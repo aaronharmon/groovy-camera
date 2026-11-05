@@ -61,6 +61,7 @@ These come from decisions in `plan.md`, and the reasons aren't obvious from the 
 
 - **Never lose a photo.** The original is on disk before anything else happens, and the queue processes one shot at a time and resumes after a crash. A slow queue is acceptable. The shutter never waits on processing.
 - **Set white once, then leave it alone.** Set White on the empty table fixes white balance and exposure (white at 90–95%, never clipped) until the user sets it again. Don't add live or per-photo adjustment: the light doesn't change, and reading the image while a record is in frame is what broke dark sleeves. Focus locks on the first shot and holds, because the tripod height is fixed.
+- **Rotate and crop only: never warp a record's shape.** No perspective correction and no uneven scaling. Warping to detected corners made a back cover look tilted in 3D. The level keeps the phone flat, which is what prevents keystoning.
 - **Uploads start after Done, once the name is final and its toast has ended.** Retakes, discards and name fixes before that never touch R2.
 - **R2 paths are worked out at upload time** from a validated slug and a known filename, always under `records/`. Local files are stored by id, so a name change never moves one.
 - **Ignore device orientation.** A phone lying flat doesn't report a useful one, so the app is portrait-locked and "up" is the top of the phone.

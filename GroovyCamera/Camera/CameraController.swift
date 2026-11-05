@@ -23,9 +23,14 @@ enum QualityChoice: String, CaseIterable, Sendable {
 struct CameraDebugOptions: Equatable, Sendable {
     var lens = Lens.ultraWide
     var shutterDenominator = 30
-    var quality = QualityChoice.balanced
+    /// How bright the white table comes out, as a percentage. Takes effect at the next Set White.
+    var whiteTargetPercent = 92
+    /// Quality with global tone mapping off gave by far the sharpest print in side-by-side shots of
+    /// the same back cover, at about 1.2 s per photo. Tone mapping off also shifts brightness the
+    /// least between dark and pale sleeves.
+    var quality = QualityChoice.quality
     var videoFeed = true
-    var globalToneMapping = true
+    var globalToneMapping = false
     var sRGB = true
     var zeroShutterLag = false
     var jpeg = false
@@ -311,7 +316,8 @@ final class CameraController: NSObject, @unchecked Sendable {
     }
 
     private func updateSetting(with sample: BackgroundSample, device: AVCaptureDevice, now: CFTimeInterval) {
-        settledReadings = CameraLoop.isSettled(sample) ? settledReadings + 1 : 0
+        let whiteTarget = Double(status.options.whiteTargetPercent) / 100
+        settledReadings = CameraLoop.isSettled(sample, target: whiteTarget) ? settledReadings + 1 : 0
         let isDone = settledReadings >= Self.settledReadingsNeeded
         if isDone || now >= deadline {
             let current = device.deviceWhiteBalanceGains
@@ -336,7 +342,8 @@ final class CameraController: NSObject, @unchecked Sendable {
         let exposure = CameraLoop.nextExposure(
             current: ExposureSetting(duration: device.exposureDuration.seconds, iso: Double(device.iso)),
             sample: sample,
-            limits: exposureLimits(of: device)
+            limits: exposureLimits(of: device),
+            target: whiteTarget
         )
         target = (gains, exposure)
         apply(gains: gains, exposure: exposure)

@@ -49,7 +49,7 @@ Any slot can be retaken by tapping its thumbnail. **Extra photos** (inserts, dam
 
 ## 3. Framing: 1:1, guidelines and squaring
 
-**1:1 output.** The viewfinder is square and shows the framing, including the white background; the thumbnail shows the final crop. The tripod height is fixed, so the app shoots on the ultra-wide camera at 12 MP and crops to square, leaving room to straighten. Output: **2048 × 2048 JPEG, sRGB**, the size eBay and Shopify want.
+**1:1 output.** The viewfinder is square and shows the framing, including the white background; the thumbnail shows the final crop. The tripod height is fixed, so the app shoots on the ultra-wide camera at up to 48 MP and crops to square, leaving room to straighten. Output: **2048 × 2048 JPEG, sRGB**, the size eBay and Shopify want.
 
 **Guidelines**
 
@@ -61,7 +61,7 @@ Any slot can be retaken by tapping its thumbnail. **Extra photos** (inserts, dam
 
 - **Line-up guides only:** there's no live outline or auto-capture. You line the record up with the guides and press the shutter.
 - **Level:** a bubble level shows when the phone is flat, which prevents keystoning. Green within ±1.5°.
-- **Autocrop to the sleeve edge:** after capture, the app straightens the sleeve and crops exactly to its edges, so the sleeve fills the whole square with no background. If the edges can't be found, it falls back to a center crop of the guide area.
+- **Autocrop to the sleeve edge:** after capture, the app rotates the sleeve upright and crops to its edges, so the sleeve fills the whole square with no background. It only ever rotates, crops and scales evenly; it never warps a record's shape to correct perspective. If the edges can't be found, it falls back to a center crop of the guide area.
 - **Disc shots:** cropped to a square just around the disc's edge, disc centered.
 
 Flash is off (glare on vinyl and shrink wrap). Volume buttons work as the shutter.
@@ -155,7 +155,7 @@ records/
 | --- | --- |
 | App | SwiftUI |
 | Camera | AVFoundation; white balance and exposure set once from the empty white table and kept until set again; focus locked on the first shot |
-| Squaring | Vision rectangle detection for sleeves, contour detection and circle fit for discs; Core Image straighten and crop |
+| Squaring | Vision rectangle detection for sleeves, with each side then moved to where the table really ends; contour detection and circle fit for discs; Core Image rotate and crop only, no perspective warp |
 | Level | Core Motion |
 | Naming | Vision text recognition; Apple's on-device Foundation Models |
 | Local store | SwiftData for sessions and the upload queue |

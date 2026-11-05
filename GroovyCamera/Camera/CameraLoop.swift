@@ -29,7 +29,6 @@ struct ExposureLimits: Equatable, Sendable {
 enum CameraLoop {
     /// Middle of the 90–95% band: bright, but with headroom so pale sleeves keep their edges.
     static let targetBrightness = 0.925
-    static let brightnessBand = 0.90...0.95
     static let neutralTolerance = 0.01
     /// Above this share of clipped pixels, channel ratios can't be trusted.
     private static let clippingLimit = 0.2
@@ -62,6 +61,7 @@ enum CameraLoop {
         current: ExposureSetting,
         sample: BackgroundSample,
         limits: ExposureLimits,
+        target: Double = targetBrightness,
         damping: Double = 0.6
     ) -> ExposureSetting {
         let factor: Double
@@ -70,7 +70,7 @@ enum CameraLoop {
             factor = 0.7
         } else {
             let measured = max(linear(sample.brightness), 0.005)
-            factor = min(max(pow(linear(targetBrightness) / measured, damping), 0.25), 2)
+            factor = min(max(pow(linear(target) / measured, damping), 0.25), 2)
         }
 
         let total = current.duration * current.iso * factor
@@ -86,8 +86,8 @@ enum CameraLoop {
         return ExposureSetting(duration: duration, iso: iso)
     }
 
-    static func isSettled(_ sample: BackgroundSample) -> Bool {
-        brightnessBand.contains(sample.brightness)
+    static func isSettled(_ sample: BackgroundSample, target: Double = targetBrightness) -> Bool {
+        abs(sample.brightness - target) <= 0.025
             && sample.neutralError <= neutralTolerance
             && sample.clippedFraction <= 0.01
     }

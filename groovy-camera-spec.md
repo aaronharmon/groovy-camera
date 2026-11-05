@@ -49,38 +49,37 @@ Any slot can be retaken by tapping its thumbnail. **Extra photos** (inserts, dam
 
 ## 3. Framing: 1:1, guidelines and squaring
 
-**1:1 output.** The viewfinder is square and shows the framing, including the white background; the thumbnail shows the final crop. The app captures at full sensor resolution and crops to square, leaving room to straighten. Output: **2400 × 2400 JPEG, sRGB** (~1 MB each).
+**1:1 output.** The viewfinder is square and shows the framing, including the white background; the thumbnail shows the final crop. The tripod height is fixed, so the app shoots on the ultra-wide camera at 12 MP and crops to square, leaving room to straighten. Output: **2048 × 2048 JPEG, sRGB**, the size eBay and Shopify want.
 
 **Guidelines**
 
-- **Sleeve target:** a square outline showing where the sleeve edges should sit, with some white background visible around it (the app needs that background to find the edges and set white balance; it's cropped off afterwards).
+- **Sleeve target:** a square outline showing where the sleeve edges should sit, with some white background visible around it (the app needs that background to find the edges; it's cropped off afterwards).
 - **Disc circle** and **center dot** for disc shots, so the spindle hole lands dead center.
 - **Center crosshair** on every shot.
 
 **Squaring assist**
 
-- **Edge detection:** the app finds the sleeve (or disc) against the white background and draws its outline live. Amber when rotated or off-center, green when lined up.
-- **Level:** a bubble level shows when the phone is flat over the table, which prevents keystoning. Green within ±1.5°.
-- **Auto-capture (on by default):** when the outline is green, complete and inside the guide, the white margin around it is clear (so no hand is in the frame), the phone is level and the image is still for a full half second, the shutter fires. It re-arms only after the outline is lost, meaning the record was moved.
+- **Line-up guides only:** there's no live outline or auto-capture. You line the record up with the guides and press the shutter.
+- **Level:** a bubble level shows when the phone is flat, which prevents keystoning. Green within ±1.5°.
 - **Autocrop to the sleeve edge:** after capture, the app straightens the sleeve and crops exactly to its edges, so the sleeve fills the whole square with no background. If the edges can't be found, it falls back to a center crop of the guide area.
 - **Disc shots:** cropped to a square just around the disc's edge, disc centered.
 
 Flash is off (glare on vinyl and shrink wrap). Volume buttons work as the shutter.
 
-## 4. Automatic white balance
+## 4. White balance: set once
 
-You shoot on a white background under warm light. The app uses that background as its reference, so there is nothing to calibrate.
+You shoot on a white table under one warm light that doesn't change, so the app measures it once and then leaves it alone.
 
 **How it works**
 
-1. **Live:** the app continuously samples the white background around the sleeve or disc, works out the color shift that would make it pure white, and sets the camera's white balance to match. The preview looks neutral before you press the shutter.
-2. **Lock on first shot:** the app sets exposure from the background, placing it at roughly 90–95% brightness and never at clipping. Once the session's first photo is taken, white balance, exposure and focus are locked for the rest of the session, so all photos of a record match exactly.
-3. **Per-photo correction:** after each capture, and before cropping to the sleeve, the app checks the white background in the full frame and corrects any remaining tint, so a slight drift in light doesn't show.
+1. **Set White:** with the table empty, tap **Set White**. In a few seconds the app works out the white balance that makes the table neutral, and the exposure that puts it at roughly 90–95% brightness, never at clipping.
+2. **Locked from then on:** those values are kept, even after closing the app, until you tap **Set White** again. Nothing adjusts live or per photo, so a dark sleeve and a white sleeve are shot exactly the same way and every photo of every record matches.
+3. **Focus** locks on the first shot, because the stand height is fixed.
 
 **Edge cases**
 
-- If the sleeve fills almost the whole frame and there's too little white to sample, the app uses the session's locked value.
-- A white or very pale sleeve on the white background: edge detection may struggle; the app falls back to the center crop and still uses the margin for color.
+- If the light changes or the phone moves to a different setup, tap **Set White** again.
+- If the reading doesn't settle (something's on the table, or the light is too warm for the camera to correct fully), the app says so.
 - Mixed light (window + lamp) can leave uneven color across the frame; one light source gives the best results.
 
 ## 5. Automatic album naming (on device)
@@ -112,10 +111,10 @@ An open gatefold is about twice as wide as it is tall, so it gets its own frame 
 
 - Tap **Gatefold** during a session to shoot slot 09.
 - The viewfinder switches to a **2:1 frame** with two side-by-side square guides and a dashed **spine line** down the middle.
-- Edge detection looks for the 2:1 spread; the level and auto-capture work the same as in normal mode.
-- Same white balance and exposure as the rest of the session, corrected against the white background. Focus is set once for the spread, then the session's locked focus returns.
-- Shot on the main camera, not the ultra-wide, to avoid distortion. A hint to step back or raise the phone so the whole spread fits with some background around it.
-- **Output:** autocropped to the edges of the spread, one 2:1 JPEG, 3200 × 1600, saved as `09-gatefold.jpg`.
+- After capture, edge detection looks for the 2:1 spread. The level works the same as in normal mode.
+- Same white balance and exposure as every other shot. Focus is set once for the spread, then the session's locked focus returns.
+- The tripod height is fixed, so the spread lies sideways under the phone, along its long side, and the output is rotated to match.
+- **Output:** autocropped to the edges of the spread, one 2:1 JPEG, 4096 × 2048, saved as `09-gatefold.jpg`.
 
 ## 7. Cloudflare storage
 
@@ -142,28 +141,27 @@ records/
 **Camera (home).** Opens straight into the viewfinder.
 
 - Top: album name chip, current slot ("04 · Side B").
-- Center: square (or 2:1) viewfinder with guides, live outline and level.
-- Bottom: shutter, thumbnail strip of this session's slots (tap to retake), **Gatefold**, **+ Extra**, **Done**.
+- Center: square (or 2:1) viewfinder with guides and level.
+- Bottom: shutter, thumbnail strip of this session's slots (tap to retake), **Gatefold**, **+ Extra**, **Done**, **Set White**.
 - **Discard session**, once the session has a photo.
 
 **Library.** Records newest first, with front-cover thumbnail, name and upload status. Tap one to see thumbnails of its photos, rename it or add extras. Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
 
-**Settings.** R2 account ID, bucket name and token credentials; auto-capture on/off; keep local copies for N days.
+**Settings.** R2 account ID, bucket name and token credentials; keep local copies for N days.
 
 ## 9. Technical notes
 
 | Area | Approach |
 | --- | --- |
 | App | SwiftUI |
-| Camera | AVFoundation; white balance and exposure set from the sampled white background, locked with focus per session |
+| Camera | AVFoundation; white balance and exposure set once from the empty white table and kept until set again; focus locked on the first shot |
 | Squaring | Vision rectangle detection for sleeves, contour detection and circle fit for discs; Core Image straighten and crop |
 | Level | Core Motion |
 | Naming | Vision text recognition; Apple's on-device Foundation Models |
-| Correction | Core Image neutral-white adjustment from the white background, before cropping |
 | Local store | SwiftData for sessions and the upload queue |
 | Upload | Background URLSession → R2 (S3-compatible API, signed on the phone) |
 
-**Device requirement:** an iPhone with Apple Intelligence (iPhone 15 Pro or newer), on iOS 27. Older phones and earlier iOS versions aren't supported.
+**Device requirement:** an iPhone with Apple Intelligence (iPhone 15 Pro or newer), on iOS 26 or newer. Older phones and earlier iOS versions aren't supported.
 
 Personal app, not on the App Store: installed from Xcode or TestFlight. A paid Apple Developer account avoids having to reinstall every 7 days.
 
@@ -174,8 +172,8 @@ Personal app, not on the App Store: installed from Xcode or TestFlight. A paid A
 **Milestones**
 
 0. **Device spike:** project setup, camera tests on the real stand and light, sample photos.
-1. **Camera core:** session shot list, Discard session, square capture, guides, level, auto white balance, exposure and focus lock, local save.
+1. **Camera core:** session shot list, Discard session, square capture, guides, level, Set White, focus lock, local save.
 2. **Naming:** text recognition on the sleeve front and back, name chip, rename.
 3. **Cloudflare:** R2 bucket, direct background uploads, Library.
-4. **Squaring polish:** live outline, straightening, auto-capture.
+4. **Squaring:** edge detection after capture, straightening and crop.
 5. **Gatefold mode.**

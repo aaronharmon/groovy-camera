@@ -53,16 +53,15 @@ xcodebuild test -project GroovyCamera.xcodeproj -scheme GroovyCamera \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Target is iOS 27 only, on iPhones with Apple Intelligence.
+Target is iOS 26 or newer, on iPhones with Apple Intelligence.
 
 ## Things that are easy to break
 
 These come from decisions in `plan.md`, and the reasons aren't obvious from the code.
 
 - **Never lose a photo.** The original is on disk before anything else happens, and the queue processes one shot at a time and resumes after a crash. A slow queue is acceptable. The shutter never waits on processing.
-- **Consistency over per-shot optimization.** White balance, exposure and focus lock on a session's first shot, with the white background at 90–95% brightness and never clipped. Gatefold refocuses once because the arm is raised. It uses the main camera, never the ultra-wide.
+- **Set white once, then leave it alone.** Set White on the empty table fixes white balance and exposure (white at 90–95%, never clipped) until the user sets it again. Don't add live or per-photo adjustment: the light doesn't change, and reading the image while a record is in frame is what broke dark sleeves. Focus locks on the first shot and holds, because the tripod height is fixed.
 - **Uploads start after Done, once the name is final and its toast has ended.** Retakes, discards and name fixes before that never touch R2.
 - **R2 paths are worked out at upload time** from a validated slug and a known filename, always under `records/`. Local files are stored by id, so a name change never moves one.
 - **Ignore device orientation.** A phone lying flat doesn't report a useful one, so the app is portrait-locked and "up" is the top of the phone.
-- **Auto-capture must not fire on a hand.** All of its conditions (plan D10) must hold for the full 0.5 s, including a clear white margin.
 - **Background uploads must work on a locked phone,** so photo files and the Keychain token must stay accessible after first unlock. The token is this-device-only.

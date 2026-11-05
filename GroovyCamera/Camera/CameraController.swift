@@ -7,44 +7,12 @@ enum WhiteState: Equatable, Sendable {
     case set(isNeutral: Bool)
 }
 
-enum QualityChoice: String, CaseIterable, Sendable {
-    case speed, balanced, quality
-
-    var prioritization: AVCapturePhotoOutput.QualityPrioritization {
-        switch self {
-        case .speed: .speed
-        case .balanced: .balanced
-        case .quality: .quality
-        }
-    }
-}
-
-/// TEMPORARY: settings exposed in the debug panel while diagnosing photo size and sharpness.
-struct CameraDebugOptions: Equatable, Sendable {
-    var lens = Lens.ultraWide
-    var shutterDenominator = 30
-    /// How bright the white table comes out, as a percentage. Takes effect at the next Set White.
-    var whiteTargetPercent = 92
-    /// Quality with global tone mapping off gave by far the sharpest print in side-by-side shots of
-    /// the same back cover, at about 1.2 s per photo. Tone mapping off also shifts brightness the
-    /// least between dark and pale sleeves.
-    var quality = QualityChoice.quality
-    var videoFeed = true
-    var globalToneMapping = false
-    var sRGB = true
-    var zeroShutterLag = false
-    var jpeg = false
-    var photoPreset = false
-}
-
 struct CameraStatus: Sendable {
     var message: String?
     var white = WhiteState.notSet
     var gains = ColorGains(red: 1, green: 1, blue: 1)
     var exposure = ExposureSetting(duration: 0, iso: 0)
     var lensPosition = 0.0
-    var options = CameraDebugOptions()
-    var requestedPhotoSize = ""
     var revision = 0
 }
 
@@ -52,18 +20,20 @@ struct CameraStatus: Sendable {
 /// then never change. Nothing adjusts live, so the darkness of a record can't affect the shot.
 ///
 /// All camera state is confined to `queue`. Saving runs on its own serial queue, one photo at a
-/// time, so a burst of shots waits on disk rather than building up in memory.
+/// time, so a burst of shots waits on disk rather than building up in memory. This class only gets
+/// the original onto disk: everything after that belongs to `SessionController`'s queue.
 final class CameraController: NSObject, @unchecked Sendable {
     let session = AVCaptureSession()
 
     /// Delivered on arbitrary queues.
     var onStatus: (@Sendable (CameraStatus) -> Void)?
-    /// Delivered on arbitrary queues. Nil means the photo couldn't be captured or saved.
-    var onSaved: (@Sendable (OriginalSidecar?) -> Void)?
+    /// Delivered on arbitrary queues, once the original is on disk or has failed.
+    var onCaptured: (@Sendable (_ ticket: CaptureTicket, _ didSave: Bool) -> Void)?
 
     private let queue = DispatchQueue(label: "camera")
     private let saveQueue = DispatchQueue(label: "camera.save", qos: .utility)
-    private let store = OriginalStore()
+    private let files: PhotoFiles
+    private let lens = Lens.ultraWide
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private var device: AVCaptureDevice?
@@ -80,33 +50,15 @@ final class CameraController: NSObject, @unchecked Sendable {
     private static let settingTimeLimit: CFTimeInterval = 6
     private static let settledReadingsNeeded = 2
 
+    init(files: PhotoFiles) {
+        self.files = files
+    }
+
     func start() {
         queue.async { [self] in
             configure()
             guard device != nil else { return }
             session.startRunning()
-            publish()
-            if ProcessInfo.processInfo.arguments.contains("--selftest") { runSelfTest() }
-        }
-    }
-
-    /// TEMPORARY: applies the debug panel's settings.
-    func update(_ options: CameraDebugOptions) {
-        queue.async { [self] in
-            let previous = status.options
-            guard options != previous else { return }
-            status.options = options
-            let needsReconfigure = options.lens != previous.lens
-                || options.videoFeed != previous.videoFeed
-                || options.globalToneMapping != previous.globalToneMapping
-                || options.sRGB != previous.sRGB
-                || options.zeroShutterLag != previous.zeroShutterLag
-                || options.photoPreset != previous.photoPreset
-            if needsReconfigure {
-                configure()
-            } else if options.shutterDenominator != previous.shutterDenominator {
-                changeShutterKeepingBrightness()
-            }
             publish()
         }
     }
@@ -125,10 +77,13 @@ final class CameraController: NSObject, @unchecked Sendable {
         }
     }
 
-    func capture(sessionID: String, shotIndex: Int) {
+    func capture(_ ticket: CaptureTicket) {
         let shutterTime = CACurrentMediaTime()
         queue.async { [self] in
-            guard let device else { return }
+            guard let device else {
+                onCaptured?(ticket, false)
+                return
+            }
             // The tripod height is fixed, so the first shot's focus holds for the rest.
             if !isFocusLocked {
                 isFocusLocked = true
@@ -138,15 +93,14 @@ final class CameraController: NSObject, @unchecked Sendable {
 
             let settings = makePhotoSettings()
             let photoCapture = PhotoCapture(
-                sessionID: sessionID,
-                shotIndex: shotIndex,
+                ticket: ticket,
+                lens: lens,
                 shutterTime: shutterTime,
-                fileExtension: status.options.jpeg ? "jpg" : "heic",
                 snapshot: status,
-                store: store,
+                files: files,
                 saveQueue: saveQueue
-            ) { [weak self] id, sidecar in
-                self?.onSaved?(sidecar)
+            ) { [weak self] id, didSave in
+                self?.onCaptured?(ticket, didSave)
                 self?.queue.async { self?.inFlight[id] = nil }
             }
             inFlight[settings.uniqueID] = photoCapture
@@ -155,18 +109,19 @@ final class CameraController: NSObject, @unchecked Sendable {
     }
 
     private func makePhotoSettings() -> AVCapturePhotoSettings {
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: status.options.jpeg ? AVVideoCodecType.jpeg : .hevc])
+        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
         settings.flashMode = .off
-        settings.photoQualityPrioritization = status.options.quality.prioritization
+        // Side by side on the same back cover, more processing gave clearly sharper print. It costs
+        // about half a second per photo at 12 MP, and the shutter doesn't wait for it.
+        settings.photoQualityPrioritization = .quality
         return settings
     }
 
     // MARK: - Setup
 
     private func configure() {
-        let options = status.options
-        guard let camera = AVCaptureDevice.default(options.lens.deviceType, for: .video, position: .back) else {
+        guard let camera = AVCaptureDevice.default(lens.deviceType, for: .video, position: .back) else {
             status.message = "This phone doesn't have that camera"
             publish()
             return
@@ -176,7 +131,6 @@ final class CameraController: NSObject, @unchecked Sendable {
         session.inputs.forEach(session.removeInput)
         session.outputs.forEach(session.removeOutput)
         session.automaticallyConfiguresCaptureDeviceForWideColor = false
-        if options.photoPreset { session.sessionPreset = .photo }
 
         guard let input = try? AVCaptureDeviceInput(device: camera), session.canAddInput(input) else {
             session.commitConfiguration()
@@ -186,19 +140,19 @@ final class CameraController: NSObject, @unchecked Sendable {
         }
         session.addInput(input)
         session.addOutput(photoOutput)
-        if options.videoFeed {
-            videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
-            videoOutput.alwaysDiscardsLateVideoFrames = true
-            videoOutput.setSampleBufferDelegate(self, queue: queue)
-            session.addOutput(videoOutput)
-        }
+        // Set White reads the table from this feed.
+        videoOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        videoOutput.alwaysDiscardsLateVideoFrames = true
+        videoOutput.setSampleBufferDelegate(self, queue: queue)
+        session.addOutput(videoOutput)
 
         let format = Self.bestFormat(of: camera)
         withConfiguration(camera) { device in
-            if !options.photoPreset, let format { device.activeFormat = format }
-            let wanted: AVCaptureColorSpace = options.sRGB ? .sRGB : .P3_D65
-            if device.activeFormat.supportedColorSpaces.contains(wanted) { device.activeColorSpace = wanted }
-            if device.activeFormat.isGlobalToneMappingSupported { device.isGlobalToneMappingEnabled = options.globalToneMapping }
+            if let format { device.activeFormat = format }
+            if device.activeFormat.supportedColorSpaces.contains(.sRGB) { device.activeColorSpace = .sRGB }
+            // Off, because it brightened the table more with a dark sleeve in frame than a pale one:
+            // about 1.2-1.3x with it off, against 1.3-1.7x with it on, on one locked exposure.
+            if device.activeFormat.isGlobalToneMappingSupported { device.isGlobalToneMappingEnabled = false }
             // Keeps the straight edges of a sleeve straight on the ultra-wide.
             if device.isGeometricDistortionCorrectionSupported { device.isGeometricDistortionCorrectionEnabled = true }
             device.focusMode = .continuousAutoFocus
@@ -206,21 +160,21 @@ final class CameraController: NSObject, @unchecked Sendable {
         session.commitConfiguration()
 
         // Set after committing: the session can pick its own limit while it's being configured.
-        if let largest = camera.activeFormat.supportedMaxPhotoDimensions.max(by: { Self.area($0) < Self.area($1) }) {
-            photoOutput.maxPhotoDimensions = largest
+        if let size = Self.photoSize(from: camera.activeFormat.supportedMaxPhotoDimensions) {
+            photoOutput.maxPhotoDimensions = size
         }
         photoOutput.maxPhotoQualityPrioritization = .quality
-        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = options.zeroShutterLag }
+        // On a tripod there's no moment to catch, and it's off in every shot these settings were chosen from.
+        if photoOutput.isZeroShutterLagSupported { photoOutput.isZeroShutterLagEnabled = false }
 
         // Portrait always, whatever the phone reports: lying flat, its orientation is meaningless.
         photoOutput.connection(with: .video)?.videoRotationAngle = 90
 
         device = camera
         isFocusLocked = false
-        status.requestedPhotoSize = "\(photoOutput.maxPhotoDimensions.width)×\(photoOutput.maxPhotoDimensions.height)"
         status.revision += 1
 
-        if let saved = WhiteSetting.load(for: options.lens) {
+        if let saved = WhiteSetting.load(for: lens) {
             apply(gains: saved.gains, exposure: saved.exposure)
             status.white = .set(isNeutral: saved.isNeutral)
         } else {
@@ -232,7 +186,16 @@ final class CameraController: NSObject, @unchecked Sendable {
         }
     }
 
-    /// The 4:3 format with the largest photo and the widest view, using the smallest video stream
+    /// Photos are 12 MP, never larger: the finished photo is only 2048 x 2048, so bigger originals
+    /// would cost time and storage on every shot.
+    private static let maxPhotoArea = 4032 * 3024
+
+    /// The largest size offered within the limit.
+    static func photoSize(from sizes: [CMVideoDimensions]) -> CMVideoDimensions? {
+        sizes.filter { area($0) <= maxPhotoArea }.max { area($0) < area($1) }
+    }
+
+    /// The 4:3 format with the most sensor and the widest view, using the smallest video stream
     /// that's still sharp enough to preview.
     private static func bestFormat(of device: AVCaptureDevice) -> AVCaptureDevice.Format? {
         device.formats
@@ -282,8 +245,7 @@ final class CameraController: NSObject, @unchecked Sendable {
             minDuration: device.activeFormat.minExposureDuration.seconds,
             maxDuration: min(device.activeFormat.maxExposureDuration.seconds, 1.0 / 8),
             minISO: Double(device.activeFormat.minISO),
-            maxISO: Double(device.activeFormat.maxISO),
-            preferredDuration: 1.0 / Double(status.options.shutterDenominator)
+            maxISO: Double(device.activeFormat.maxISO)
         )
     }
 
@@ -304,20 +266,8 @@ final class CameraController: NSObject, @unchecked Sendable {
         }
     }
 
-    /// TEMPORARY: trades shutter against ISO so a debug shutter change needs no new Set White.
-    private func changeShutterKeepingBrightness() {
-        let lens = status.options.lens
-        guard var setting = WhiteSetting.load(for: lens) else { return }
-        let total = setting.exposure.duration * setting.exposure.iso
-        setting.exposure.duration = 1.0 / Double(status.options.shutterDenominator)
-        setting.exposure.iso = total / setting.exposure.duration
-        apply(gains: setting.gains, exposure: setting.exposure)
-        setting.save(for: lens)
-    }
-
     private func updateSetting(with sample: BackgroundSample, device: AVCaptureDevice, now: CFTimeInterval) {
-        let whiteTarget = Double(status.options.whiteTargetPercent) / 100
-        settledReadings = CameraLoop.isSettled(sample, target: whiteTarget) ? settledReadings + 1 : 0
+        settledReadings = CameraLoop.isSettled(sample) ? settledReadings + 1 : 0
         let isDone = settledReadings >= Self.settledReadingsNeeded
         if isDone || now >= deadline {
             let current = device.deviceWhiteBalanceGains
@@ -327,7 +277,7 @@ final class CameraController: NSObject, @unchecked Sendable {
                 isNeutral: isDone
             )
             apply(gains: setting.gains, exposure: setting.exposure)
-            setting.save(for: status.options.lens)
+            setting.save(for: lens)
             status.white = .set(isNeutral: isDone)
             publish()
             return
@@ -342,53 +292,12 @@ final class CameraController: NSObject, @unchecked Sendable {
         let exposure = CameraLoop.nextExposure(
             current: ExposureSetting(duration: device.exposureDuration.seconds, iso: Double(device.iso)),
             sample: sample,
-            limits: exposureLimits(of: device),
-            target: whiteTarget
+            limits: exposureLimits(of: device)
         )
         target = (gains, exposure)
         apply(gains: gains, exposure: exposure)
     }
 
-    // MARK: - Self-test
-
-    /// TEMPORARY: logs the photo size each combination of settings really produces.
-    /// Runs only when launched with `--selftest`, and saves nothing.
-    private func runSelfTest() {
-        let base = CameraDebugOptions()
-        func with(_ change: (inout CameraDebugOptions) -> Void) -> CameraDebugOptions {
-            var options = base
-            change(&options)
-            return options
-        }
-        let combos: [(String, CameraDebugOptions)] = [
-            ("baseline-ultrawide", base),
-            ("no-video-feed", with { $0.videoFeed = false }),
-            ("no-tone-mapping", with { $0.globalToneMapping = false }),
-            ("p3", with { $0.sRGB = false }),
-            ("zero-shutter-lag", with { $0.zeroShutterLag = true }),
-            ("jpeg", with { $0.jpeg = true }),
-            ("photo-preset", with { $0.photoPreset = true }),
-            ("no-video-no-tone-p3", with { $0.videoFeed = false; $0.globalToneMapping = false; $0.sRGB = false }),
-            ("main-baseline", with { $0.lens = .main }),
-            ("main-no-video-no-tone-p3", with { $0.lens = .main; $0.videoFeed = false; $0.globalToneMapping = false; $0.sRGB = false }),
-            ("back-to-baseline", base),
-        ]
-        for (index, combo) in combos.enumerated() {
-            queue.asyncAfter(deadline: .now() + 2 + Double(index) * 4) { [self] in
-                status.options = combo.1
-                configure()
-                queue.asyncAfter(deadline: .now() + 2.5) { [self] in
-                    let settings = makePhotoSettings()
-                    let probe = SelfTestProbe(name: combo.0) { [weak self] id in
-                        self?.queue.async { self?.inFlight[id] = nil }
-                    }
-                    inFlight[settings.uniqueID] = probe
-                    print("SELFTEST shoot \(combo.0) requested \(settings.maxPhotoDimensions.width)x\(settings.maxPhotoDimensions.height) active=\(device?.activeFormat.supportedMaxPhotoDimensions.map { "\($0.width)x\($0.height)" } ?? [])")
-                    photoOutput.capturePhoto(with: settings, delegate: probe)
-                }
-            }
-        }
-    }
 }
 
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -408,56 +317,36 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
             height: CVPixelBufferGetHeight(buffer),
             bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
             layout: .bgra,
-            ring: status.options.lens.emptyTable
+            ring: lens.emptyTable
         )
         if let sample { updateSetting(with: sample, device: device, now: now) }
     }
 }
 
-/// TEMPORARY: reports what the self-test's shots really came out as.
-private final class SelfTestProbe: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
-    private let name: String
-    private let finished: @Sendable (Int64) -> Void
-
-    init(name: String, finished: @escaping @Sendable (Int64) -> Void) {
-        self.name = name
-        self.finished = finished
-    }
-
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        let size = photo.resolvedSettings.photoDimensions
-        print("SELFTEST result \(name) \(size.width)x\(size.height) bytes=\(photo.fileDataRepresentation()?.count ?? -1) error=\(String(describing: error))")
-        finished(photo.resolvedSettings.uniqueID)
-    }
-}
-
 /// One photo's trip from shutter to disk.
 private final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
-    private let sessionID: String
-    private let shotIndex: Int
+    private let ticket: CaptureTicket
+    private let lens: Lens
     private let shutterTime: CFTimeInterval
-    private let fileExtension: String
     private let snapshot: CameraStatus
-    private let store: OriginalStore
+    private let files: PhotoFiles
     private let saveQueue: DispatchQueue
-    private let finished: @Sendable (Int64, OriginalSidecar?) -> Void
+    private let finished: @Sendable (Int64, Bool) -> Void
 
     init(
-        sessionID: String,
-        shotIndex: Int,
+        ticket: CaptureTicket,
+        lens: Lens,
         shutterTime: CFTimeInterval,
-        fileExtension: String,
         snapshot: CameraStatus,
-        store: OriginalStore,
+        files: PhotoFiles,
         saveQueue: DispatchQueue,
-        finished: @escaping @Sendable (Int64, OriginalSidecar?) -> Void
+        finished: @escaping @Sendable (Int64, Bool) -> Void
     ) {
-        self.sessionID = sessionID
-        self.shotIndex = shotIndex
+        self.ticket = ticket
+        self.lens = lens
         self.shutterTime = shutterTime
-        self.fileExtension = fileExtension
         self.snapshot = snapshot
-        self.store = store
+        self.files = files
         self.saveQueue = saveQueue
         self.finished = finished
     }
@@ -465,45 +354,37 @@ private final class PhotoCapture: NSObject, AVCapturePhotoCaptureDelegate, @unch
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         let id = photo.resolvedSettings.uniqueID
         guard error == nil, let data = photo.fileDataRepresentation() else {
-            finished(id, nil)
+            finished(id, false)
             return
         }
 
         let processedTime = CACurrentMediaTime()
         let dimensions = photo.resolvedSettings.photoDimensions
         saveQueue.async { [self] in
-            let url = store.photoURL(sessionID: sessionID, shotIndex: shotIndex, fileExtension: fileExtension)
-            guard (try? store.savePhoto(data, to: url)) != nil else {
-                finished(id, nil)
+            guard (try? files.saveOriginal(data, for: ticket.location)) != nil else {
+                finished(id, false)
                 return
             }
             let savedTime = CACurrentMediaTime()
-
             // The original is safe on disk by now, so a failure here can't lose the photo.
-            let finishedURL = store.finishedPhotoURL(sessionID: sessionID, shotIndex: shotIndex)
-            let output = PhotoPipeline.process(url: url, lens: snapshot.options.lens)
-            if let output {
-                try? output.jpeg.write(to: finishedURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            }
-
-            let sidecar = OriginalSidecar(
-                sessionID: sessionID,
-                shotIndex: shotIndex,
-                capturedAt: Date(),
-                lens: snapshot.options.lens,
-                debugOptions: String(describing: snapshot.options),
-                pixelWidth: Int(dimensions.width),
-                pixelHeight: Int(dimensions.height),
-                gains: snapshot.gains,
-                exposure: snapshot.exposure,
-                lensPosition: snapshot.lensPosition,
-                savedSample: SavedPhotoAnalyzer.analyze(url: url, ring: snapshot.options.lens.aroundGuide),
-                cropKind: output?.cropKind,
-                shutterToProcessedMS: Int((processedTime - shutterTime) * 1000),
-                shutterToSavedMS: Int((savedTime - shutterTime) * 1000)
+            try? files.saveSidecar(
+                OriginalSidecar(
+                    sessionID: ticket.location.sessionID,
+                    photoID: ticket.location.photoID,
+                    slotNumber: ticket.slot.number,
+                    capturedAt: Date(),
+                    lens: lens,
+                    pixelWidth: Int(dimensions.width),
+                    pixelHeight: Int(dimensions.height),
+                    gains: snapshot.gains,
+                    exposure: snapshot.exposure,
+                    lensPosition: snapshot.lensPosition,
+                    shutterToProcessedMS: Int((processedTime - shutterTime) * 1000),
+                    shutterToSavedMS: Int((savedTime - shutterTime) * 1000)
+                ),
+                for: ticket.location
             )
-            try? store.saveSidecar(sidecar)
-            finished(id, sidecar)
+            finished(id, true)
         }
     }
 }

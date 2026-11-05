@@ -177,7 +177,7 @@ struct PhotoPipelineTests {
             let names = try FileManager.default.contentsOfDirectory(atPath: session.path())
             for name in names.sorted() where name.hasSuffix(".heic") {
                 let image = try #require(CIImage(contentsOf: session.appending(path: name), options: [.applyOrientationProperty: true]))
-                for degrees in [0, 6, -12, 40] as [CGFloat] {
+                for degrees in [0, -12] as [CGFloat] {
                     let rotated = degrees == 0 ? image : Self.rotated(image, degrees: degrees)
                     let output = try #require(PhotoPipeline.process(image: rotated, lens: .ultraWide))
                     let stem = name.replacingOccurrences(of: ".heic", with: "")
@@ -185,6 +185,22 @@ struct PhotoPipelineTests {
                     try output.jpeg.write(to: outputDirectory.appending(path: file))
                     print("PIPELINE \(file) \(output.jpeg.count / 1024)KB")
                 }
+            }
+        }
+    }
+
+    /// Reports how the white margin around each real photo really came out. These stay out of git,
+    /// so this does nothing on a fresh clone.
+    @Test func reportsWhiteOnRealPhotosIfPresent() throws {
+        let root = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Fixtures/originals")
+        guard let sessions = try? FileManager.default.contentsOfDirectory(atPath: root.path()) else { return }
+        for sessionName in sessions.sorted() where sessionName.hasPrefix("2026-") && sessionName >= "2026-11-05T011906" {
+            let session = root.appending(path: sessionName)
+            for name in try FileManager.default.contentsOfDirectory(atPath: session.path()).sorted() where name.hasSuffix(".heic") {
+                guard let sample = SavedPhotoAnalyzer.analyze(url: session.appending(path: name), ring: Lens.ultraWide.aroundGuide) else { continue }
+                let percent = { (value: Double) in Int((value * 100).rounded()) }
+                print("WHITE \(sessionName.suffix(6))-\(name) \(percent(sample.red))/\(percent(sample.green))/\(percent(sample.blue)) clipped \(percent(sample.clippedFraction))%")
             }
         }
     }

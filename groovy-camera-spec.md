@@ -49,7 +49,7 @@ Any slot can be retaken by tapping its thumbnail. **Extra photos** (inserts, dam
 
 ## 3. Framing: 1:1, guidelines and squaring
 
-**1:1 output.** The viewfinder is square and shows the framing, including the white background; the thumbnail shows the final crop. The tripod height is fixed, so the app shoots on the ultra-wide camera at up to 48 MP and crops to square, leaving room to straighten. Output: **2048 × 2048 JPEG, sRGB**, the size eBay and Shopify want.
+**1:1 output.** The viewfinder is square and shows the framing, including the white background; the thumbnail shows the final crop. The tripod height is fixed, so the app shoots on the ultra-wide camera at 12 MP and crops to square, leaving room to straighten. Output: **2048 × 2048 JPEG, sRGB** for every square photo, the size eBay and Shopify want.
 
 **Guidelines**
 

@@ -1,8 +1,19 @@
+import CoreMedia
 import Foundation
 import Testing
 @testable import GroovyCamera
 
 struct CameraLoopTests {
+    @Test func capsPhotosAt12MP() {
+        let sizes = [
+            CMVideoDimensions(width: 1920, height: 1440),
+            CMVideoDimensions(width: 4032, height: 3024),
+            CMVideoDimensions(width: 8064, height: 6048),
+        ]
+        let size = CameraController.photoSize(from: sizes)
+        #expect(size?.width == 4032 && size?.height == 3024)
+    }
+
     private let limits = ExposureLimits(minDuration: 1.0 / 8000, maxDuration: 1.0 / 8, minISO: 50, maxISO: 3200)
 
     /// Encodes a linear value the way the camera's output does.

@@ -7,7 +7,7 @@ enum SavedPhotoAnalyzer {
     ///
     /// The live preview and the saved photo pass through different processing, so only this
     /// measurement says whether the result is actually neutral and unclipped. Reads a downsampled
-    /// copy so that no full 48 MP image is decoded just to measure the margin.
+    /// copy so that no full-size image is decoded just to measure the margin.
     static func analyze(url: URL, ring: GuideRing, maxPixelSize: Int = 2000) -> BackgroundSample? {
         guard
             let source = CGImageSourceCreateWithURL(url as CFURL, nil),

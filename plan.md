@@ -1,6 +1,6 @@
 # Groovy Camera — Build Plan
 
-Based on `groovy-camera-spec.md` (Nov 4, 2026). Status: **M0 finished on the owner's light and two records; M1 is next.** The wider set of 10–15 test records is still to shoot (see M0).
+Based on `groovy-camera-spec.md` (Nov 4, 2026). Status: **M0 finished on the owner's light and two records. M1 is built but not yet checked on the phone. M2 is next.** The wider set of 10–15 test records is still to shoot (see M0).
 
 ## 1. Approach
 
@@ -20,7 +20,7 @@ These are places where the spec conflicts with itself or with how the platform w
 - **No folder link and no gallery.** The goal is simple: photos land in R2, and you pull them down to your laptop or build a CSV there. *This removes "copy its folder link" from spec §8.* The Library is only for checking and fixing records on the phone, and it shows **thumbnails only**.
 - **Laptop access isn't part of this build.** Downloads and CSVs use existing tools (the R2 dashboard, `rclone`, or `wrangler`). Photo URLs follow a fixed pattern, `https://<domain>/records/<folder>/<file>`, so a CSV can be built from a file listing.
 - **The phone sits on a tripod at a fixed height of roughly 30 cm.** It can't be raised, so the main lens can't fit a sleeve plus margin. We're **trying the ultra-wide** with Apple's distortion correction on, replacing the earlier main-camera decision. You line records up with guides and press the shutter, with a level for setup. **No auto-capture and no live outline.**
-- **Up to 48 MP capture, 2048 × 2048 output,** the size eBay and Shopify want. *This replaces 12 MP: side-by-side shots of the same back cover showed small print only reads crisply at 48 MP.* Each photo takes about 1.2 s to come back from the camera, which is fine at the pace of placing a record. iOS sometimes returns 12 MP instead, which still works. Gatefold stays 4096 × 2048 for now.
+- **12 MP capture, 2048 × 2048 output for every square photo,** the size eBay and Shopify want. The owner tried 48 MP, which reads small print more crisply, and decided against it, so the app caps capture at 12 MP. Gatefold stays 4096 × 2048 for now.
 - **White is set once.** You tap **Set White** on the empty table, and the app locks white balance and exposure (white at 90–95%) and keeps them across launches until you set them again. Nothing adjusts live or per photo. *This replaces the live sampling, lock on first shot and per-photo correction in the original spec §4.* The first device test showed why: the sleeve fills so much of the frame that the "white margin" was often the record itself, so dark sleeves blew out and cream sleeves turned the background blue.
 - **Discard session is added.** The camera screen gets a **Discard session** action, shown once the session has a photo and protected by a confirmation. It deletes that session's photos from the phone, stops any processing and naming still running, and opens a new session. Set White isn't affected. Uploads start only at Done (D2), so there's nothing to remove from R2. *This is an addition to spec §2 and §8.* It only covers the open session: the Library still has no delete, so anything already finished stays in R2 until you remove it there.
 - **Done shows the final name.** After Done, a short toast shows the record's final name, once naming has finished. Tapping it fixes the name. Uploads for that record start when the toast ends, a few seconds after Done, so a fix made here is a local change with no R2 copy and delete. The toast doesn't block the next record, and it never holds uploads if the app is closed or the toast can't be shown.
@@ -84,14 +84,14 @@ The shutter must never wait on processing, or the 15-second and 30-second target
 **Memory, heat and crashes**
 
 - The queue's state is saved, so any shot not yet processed picks up again after a crash or relaunch. Done is never held up, and a record's uploads simply wait for its processing to finish.
-- Only one 48 MP image is ever decoded at a time, and its memory is released before the next begins.
+- Only one full-size image is ever decoded at a time, and its memory is released before the next begins.
 - If the phone gets hot (thermal state serious or above), the app says so and the queue keeps running.
 
 **Keep originals:** a debug setting, on by default during M0–M1 and off by default after that. It lets the pipeline be re-run on real originals as the detection and color logic change. Discard session removes originals too.
 
 ### White balance, exposure and focus
 
-Set White reads the empty table for a few seconds, adjusting gains and exposure until the white is neutral and at 90–95%, then locks them and saves them. If it doesn't settle within about 6 seconds, it locks the closest result and warns you. After that, nothing reads the live image for color or exposure. The shutter prefers 1/30 s, because 1/15 s showed shake from touching the phone on its tripod, and it only goes longer if the light requires it. Photos use the Quality processing setting with global tone mapping off, which gave the sharpest results. **No software corrects the light afterward.** Clear photos come from the light itself, and these are used records, so small differences in brightness are accepted.
+Set White reads the empty table for a few seconds, adjusting gains and exposure until the white is neutral and at 90–95%, then locks them and saves them. If it doesn't settle within about 6 seconds, it locks the closest result and warns you. After that, nothing reads the live image for color or exposure. The shutter prefers 1/30 s, because 1/15 s showed shake from touching the phone on its tripod, and it only goes longer if the light requires it. Photos use the Quality processing setting with global tone mapping off, which gave sharper results than the other settings at 12 MP. **No software corrects the light afterward.** Clear photos come from the light itself, and these are used records, so small differences in brightness are accepted.
 
 Focus locks on the first shot and holds, including for gatefolds, since the height never changes.
 
@@ -139,14 +139,15 @@ Each milestone ends with something you can try on the phone. Simulator builds an
 - Session state machine and full shot list, including skip, retake, extras numbering, Done requiring slots 01 and 02, resume after a kill, and Discard session.
 - Square viewfinder, sleeve target, disc circle and center dot, crosshair, Core Motion level (±1.5°), volume-button shutter, flash off.
 - Set White, focus lock on first shot, one-at-a-time processing queue, JPEG export, local save.
-- Until M4, the output is the fallback center crop of the guide area.
+- Detection and crop from M0 stay in place rather than the fallback center crop, because they already work on real photos. M4 still measures them across the wider set of records.
+- The **Gatefold** button and its 2:1 viewfinder arrive in M5, and the name chip and toast in M2. The Keep originals setting stays on, built in, until Settings exists.
 - **Tests:** slot sequencing and numbering; discard leaves no files behind; the queue resumes after a simulated crash; white and exposure measured on the fixtures.
-- **Done when (on device):** a used LP takes under 30 seconds, all four photos of a record match in color, and a rapid burst of 48 MP shots loses nothing, with memory and heat checked in Instruments.
+- **Done when (on device):** a used LP takes under 30 seconds, all four photos of a record match in color, and a rapid burst of shots loses nothing, with memory and heat checked in Instruments.
 
 ### M2: Naming
 
 - Text reading, Foundation Models extraction, validation, fallback, name chip and editing, final-name toast, slugs, `-2` collisions, `untitled-YYYY-MM-DD-N`.
-- Keep originals switches to off by default.
+- Keep originals stays on until Settings arrives in M3, because the setting needs somewhere to live and M4 still needs originals to measure.
 - **Tests:** slug and collision rules; extraction accuracy run across all the fixtures, with the score reported.
 - **Done when (on device):** the name is right without typing on the large majority of fixtures. I'd aim for 90%, adjusted once we see real results.
 
@@ -173,7 +174,7 @@ Each milestone ends with something you can try on the phone. Simulator builds an
 ## 5. Risks
 
 1. **Very warm light may exceed the camera's color range.** The first test hit the blue gain limit of 4.0, though a sleeve was skewing that reading. If it still hits the limit on the empty table, the white won't fully neutralize, and the fix would be a slightly less warm bulb or a fixed correction at export.
-2. **Ultra-wide sharpness and distortion.** The first test had a sleeve filling about 95% of the main lens's width, which works out to roughly 30 cm above the table. On the ultra-wide, the first real shots have a sleeve at about 59% of the width, or around 1,790 px at 12 MP, so it's enlarged about 15% to reach 2048. Edges stayed straight and the sleeve landed square and centered. **The bigger problem is light:** the camera hit its ISO limit of 3600 and the app's 1/8 s shutter limit, giving heavy noise reduction and a risk of shake. M0 tests more light and the Quality processing setting. On the same sleeves, a light that let Set White lock at 1/25 s stayed sharp enough to read small print, while a dimmer one at 1/8 s reached only 64% white and smeared it. Set White can't reach 90–95% in that dim light, so the light has to be bright enough. The app requests 48 MP. The camera returned it only on Quality with tone mapping off and ISO below its limit (2 of 2 shots), and 12 MP on the same settings at the ISO limit (1 shot), so a brighter light may be what unlocks it, though that's too few shots to be sure.
+2. **Ultra-wide sharpness and distortion.** The first test had a sleeve filling about 95% of the main lens's width, which works out to roughly 30 cm above the table. On the ultra-wide, the first real shots have a sleeve at about 59% of the width, or around 1,790 px at 12 MP, so it's enlarged about 15% to reach 2048. Edges stayed straight and the sleeve landed square and centered. **The bigger problem is light:** the camera hit its ISO limit of 3600 and the app's 1/8 s shutter limit, giving heavy noise reduction and a risk of shake. M0 tests more light and the Quality processing setting. On the same sleeves, a light that let Set White lock at 1/25 s stayed sharp enough to read small print, while a dimmer one at 1/8 s reached only 64% white and smeared it. Set White can't reach 90–95% in that dim light, so the light has to be bright enough. The app caps capture at 12 MP, by the owner's decision.
 3. **Automatic processing can undo consistency.** iPhone photo processing may adjust tone from shot to shot, even with locked exposure and white balance. This is real but small enough to accept. With one locked setting, the table away from the record read 1.34–1.72× brighter (in linear light) with a dark sleeve than with a pale one when global tone mapping was on, and 1.20–1.27× with it off. The shift was even across the frame and larger in dimmer areas, which points to a tone curve and not a change in the light. Tone mapping stays off and the rest is accepted, because these are used records and speed matters more. RAW capture would remove it, at some cost in speed and pipeline complexity, but isn't planned.
 4. **Pale sleeves, glare on shrink wrap and worn corners** will all challenge edge detection. The spec's center-crop fallback covers failures, but M4's real test is how often it's needed. A false positive that crops too tightly is worse than a fallback, so detection should be conservative.
 5. **Name quality.** Artwork-only covers, stylized fonts and non-English pressings will fail sometimes. The back cover and the validation step reduce this, and the chip and Library rename handle the rest. Note that the shot list has no spine photo, so §5's "spines" only helps where a back cover repeats that text.

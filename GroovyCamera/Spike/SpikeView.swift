@@ -174,6 +174,12 @@ private struct DebugPanel: View {
                 }
                 .pickerStyle(.segmented)
 
+                Text(verbatim: "White target (then tap Set White)")
+                Picker("White target", selection: $model.options.whiteTargetPercent) {
+                    ForEach([80, 85, 88, 92], id: \.self) { Text("\($0)%").tag($0) }
+                }
+                .pickerStyle(.segmented)
+
                 Picker("Processing", selection: $model.options.quality) {
                     ForEach(QualityChoice.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }

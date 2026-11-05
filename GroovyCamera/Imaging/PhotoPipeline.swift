@@ -21,6 +21,14 @@ enum PhotoPipeline {
 
     /// Trims a sliver inside the detected edge, so no background shows along it.
     private static let edgeInset: CGFloat = 0.005
+    /// How far either side of Vision's edge to look for the real one, as a share of the sleeve.
+    /// Vision's corners have been measured up to 4% off on real sleeves.
+    private static let edgeSearchShare: CGFloat = 0.06
+    /// Only the middle of each side is searched, because worn corners and rounded tips mislead.
+    private static let edgeSearchLengthShare: CGFloat = 0.7
+    private static let edgeSearchSegments = 15
+    /// A sleeve is square to well within this, so a bigger difference means an edge was misread.
+    private static let maxSnappedAspectError: CGFloat = 0.03
     private static let detectionMaxSide: CGFloat = 1600
 
     /// One shared context: creating one per photo is slow and costs memory.
@@ -42,30 +50,31 @@ enum PhotoPipeline {
         // try again with the highlights spread apart.
         let detected = proxy(of: original).flatMap { RecordDetector.detect(in: $0, lens: lens) }
             ?? proxy(of: paleEdgesBoosted(original)).flatMap { RecordDetector.detect(in: $0, lens: lens) }
-        let cropped: CIImage?
+        let source: CIImage
+        let crop: CGRect
         let kind: CropKind
         switch detected {
         case .sleeve(let quad):
-            cropped = straightened(original, quad: quad)
+            (source, crop) = straightened(original, quad: quad)
             kind = .sleeve
         case .disc(let square):
-            let rect = CGRect(
+            source = original
+            crop = CGRect(
                 x: square.minX * extent.width,
                 y: square.minY * extent.height,
                 width: square.width * extent.width,
                 height: square.height * extent.height
             )
-            cropped = original.cropped(to: rect)
             kind = .disc
         case nil:
             let side = lens.guideHalfSide * 2 * min(extent.width, extent.height)
-            cropped = original.cropped(to: CGRect(x: extent.midX - side / 2, y: extent.midY - side / 2, width: side, height: side))
+            source = original
+            crop = CGRect(x: extent.midX - side / 2, y: extent.midY - side / 2, width: side, height: side)
             kind = .guideFallback
         }
 
         guard
-            let cropped,
-            let finished = resized(cropped),
+            let finished = resized(source, crop: crop),
             let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
             let jpeg = context.jpegRepresentation(
                 of: finished,
@@ -89,37 +98,105 @@ enum PhotoPipeline {
         return context.createCGImage(small, from: small.extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
     }
 
-    /// Corrects rotation and keystoning together by mapping the sleeve's corners to a square.
-    private static func straightened(_ image: CIImage, quad: RecordQuad) -> CIImage? {
+    /// Rotates the sleeve upright and crops to it. This is deliberately not a perspective warp: the
+    /// level keeps the phone flat, so a sleeve really is a square, and warping to four noisy
+    /// corners makes it look tilted in 3D.
+    private static func straightened(_ image: CIImage, quad: RecordQuad) -> (CIImage, CGRect) {
         let extent = image.extent
-        let center = CGPoint(
-            x: (quad.topLeft.x + quad.topRight.x + quad.bottomRight.x + quad.bottomLeft.x) / 4,
-            y: (quad.topLeft.y + quad.topRight.y + quad.bottomRight.y + quad.bottomLeft.y) / 4
+        let square = quad.fittedSquare(width: extent.width, height: extent.height)
+        let upright = CGAffineTransform(translationX: square.center.x, y: square.center.y)
+            .rotated(by: -square.radians)
+            .translatedBy(x: -square.center.x, y: -square.center.y)
+        let rotated = image.transformed(by: upright)
+        let snapped = snappedToEdges(rotated, center: square.center, side: square.side)
+        let center = snapped.center
+        let side = snapped.side * (1 - edgeInset * 2)
+        return (
+            rotated,
+            CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
         )
-        func corner(_ point: CGPoint) -> CGPoint {
-            CGPoint(
-                x: (point.x + (center.x - point.x) * edgeInset * 2) * extent.width,
-                y: (point.y + (center.y - point.y) * edgeInset * 2) * extent.height
-            )
-        }
-        let filter = CIFilter.perspectiveCorrection()
-        filter.inputImage = image
-        filter.topLeft = corner(quad.topLeft)
-        filter.topRight = corner(quad.topRight)
-        filter.bottomRight = corner(quad.bottomRight)
-        filter.bottomLeft = corner(quad.bottomLeft)
-        return filter.outputImage
     }
 
-    /// Scales to exactly the output size. Sleeves are very nearly square, so any stretch is too
-    /// small to see.
-    private static func resized(_ image: CIImage) -> CIImage? {
-        let origin = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+    /// Vision finds the right rectangle but places it loosely, which leaves a strip of table or
+    /// clips the sleeve. This moves each side to where the table really ends, looking inward from
+    /// the table so that artwork inside the sleeve can't be mistaken for its edge. It only moves the
+    /// crop, so the record's shape is untouched. A side with no clear edge, such as a pale sleeve on
+    /// the white table, keeps Vision's position.
+    private static func snappedToEdges(_ image: CIImage, center: CGPoint, side: CGFloat) -> (center: CGPoint, side: CGFloat) {
+        let half = side / 2
+        let band = side * edgeSearchShare
+        let length = side * edgeSearchLengthShare
+
+        // Each value is how far the real edge lies inside the outer limit of the search band.
+        let leftDepth = edgeDepth(in: image, band: CGRect(x: center.x - half - band, y: center.y - length / 2, width: band * 2, height: length), inwardAxis: .plusX)
+        let rightDepth = edgeDepth(in: image, band: CGRect(x: center.x + half - band, y: center.y - length / 2, width: band * 2, height: length), inwardAxis: .minusX)
+        let bottomDepth = edgeDepth(in: image, band: CGRect(x: center.x - length / 2, y: center.y - half - band, width: length, height: band * 2), inwardAxis: .plusY)
+        let topDepth = edgeDepth(in: image, band: CGRect(x: center.x - length / 2, y: center.y + half - band, width: length, height: band * 2), inwardAxis: .minusY)
+
+        let left = center.x - half + (leftDepth.map { $0 - band } ?? 0)
+        let right = center.x + half - (rightDepth.map { $0 - band } ?? 0)
+        let bottom = center.y - half + (bottomDepth.map { $0 - band } ?? 0)
+        let top = center.y + half - (topDepth.map { $0 - band } ?? 0)
+
+        let width = right - left
+        let height = top - bottom
+        guard min(width, height) > 0, abs(width - height) / min(width, height) <= maxSnappedAspectError else {
+            return (center, side)
+        }
+        return (CGPoint(x: (left + right) / 2, y: (bottom + top) / 2), min(width, height))
+    }
+
+    private enum InwardAxis { case plusX, minusX, plusY, minusY }
+
+    /// Splits the band into segments along the edge, finds the edge in each, and takes the median, so
+    /// a scuff or a stray shadow on a few segments doesn't move the crop.
+    private static func edgeDepth(in image: CIImage, band: CGRect, inwardAxis: InwardAxis) -> CGFloat? {
+        let bounds = band.integral
+        guard
+            image.extent.contains(bounds),
+            let cgImage = context.createCGImage(image, from: bounds, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)),
+            let data = cgImage.dataProvider?.data,
+            let bytes = CFDataGetBytePtr(data)
+        else { return nil }
+
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerRow = cgImage.bytesPerRow
+        func brightness(column: Int, row: Int) -> Float {
+            let pixel = bytes + row * bytesPerRow + column * 4
+            return (Float(pixel[0]) * 0.299 + Float(pixel[1]) * 0.587 + Float(pixel[2]) * 0.114) / 255
+        }
+
+        let isHorizontalSearch = inwardAxis == .plusX || inwardAxis == .minusX
+        let depthCount = isHorizontalSearch ? width : height
+        let alongCount = isHorizontalSearch ? height : width
+        // A CGImage's first row is the top of the image, the opposite way to Core Image's y axis.
+        let walksForward = inwardAxis == .plusX || inwardAxis == .minusY
+
+        let profiles = (0..<edgeSearchSegments).map { segment -> [Float] in
+            let start = alongCount * segment / edgeSearchSegments
+            let end = alongCount * (segment + 1) / edgeSearchSegments
+            return (0..<depthCount).map { step in
+                let depth = walksForward ? step : depthCount - 1 - step
+                var total: Float = 0
+                for along in start..<end {
+                    total += isHorizontalSearch ? brightness(column: depth, row: along) : brightness(column: along, row: depth)
+                }
+                return total / Float(end - start)
+            }
+        }
+        return RecordEdge.depth(acrossProfiles: profiles).map(CGFloat.init)
+    }
+
+    /// Scales evenly to the output size, so the record's shape never changes. The crop comes last
+    /// because the resize blends each pixel with its neighbours: cropping first would blend the
+    /// empty space past the edge into a dark line around the photo.
+    private static func resized(_ image: CIImage, crop: CGRect) -> CIImage? {
         let target = CGFloat(outputSide)
         let filter = CIFilter.lanczosScaleTransform()
-        filter.inputImage = origin
-        filter.scale = Float(target / origin.extent.height)
-        filter.aspectRatio = Float(origin.extent.height / origin.extent.width)
+        filter.inputImage = image.transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+        filter.scale = Float(target / min(crop.width, crop.height))
+        filter.aspectRatio = 1
         return filter.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: target, height: target))
     }
 }

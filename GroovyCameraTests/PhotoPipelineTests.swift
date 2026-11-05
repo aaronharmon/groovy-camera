@@ -85,6 +85,44 @@ struct PhotoPipelineTests {
         #expect(try brightness(result, x: 0.17, y: 0.83) < 80)
     }
 
+    @Test func findsTheOuterEdgeNotTheArtworkInside() {
+        // Table, then a cream sleeve, then a dark picture printed on it.
+        let profile = [Float](repeating: 0.9, count: 40) + [Float](repeating: 0.78, count: 30) + [Float](repeating: 0.1, count: 30)
+        #expect(RecordEdge.firstChange(in: profile) == 40)
+    }
+
+    @Test func slowFalloffOfLightIsNotAnEdge() {
+        let profile = (0..<200).map { 0.9 - Float($0) * 0.0015 }
+        #expect(RecordEdge.firstChange(in: profile) == nil)
+    }
+
+    @Test func aSpeckOnTheTableIsNotAnEdge() {
+        var profile = [Float](repeating: 0.9, count: 100)
+        profile[50] = 0.2
+        profile[51] = 0.2
+        #expect(RecordEdge.firstChange(in: profile) == nil)
+    }
+
+    @Test func aSideWithoutAgreementKeepsNoEdge() {
+        let edge = [Float](repeating: 0.9, count: 40) + [Float](repeating: 0.2, count: 40)
+        let plain = [Float](repeating: 0.9, count: 80)
+        #expect(RecordEdge.depth(acrossProfiles: [edge, plain, plain]) == nil)
+        #expect(RecordEdge.depth(acrossProfiles: [edge, edge, plain]) == 40)
+    }
+
+    /// The two rectangles Vision really proposed for a back cover: the accurate one, and a larger
+    /// one with a corner out, which warped the crop when it was chosen.
+    @Test func rejectsRectanglesWithACornerOut() {
+        func quad(_ tl: (CGFloat, CGFloat), _ tr: (CGFloat, CGFloat), _ br: (CGFloat, CGFloat), _ bl: (CGFloat, CGFloat)) -> RecordQuad {
+            func normalized(_ p: (CGFloat, CGFloat)) -> CGPoint { CGPoint(x: p.0 / 1200, y: p.1 / 1600) }
+            return RecordQuad(topLeft: normalized(tl), topRight: normalized(tr), bottomRight: normalized(br), bottomLeft: normalized(bl))
+        }
+        let accurate = quad((240, 1160), (968, 1161), (954, 425), (240, 438))
+        let cornerOut = quad((240, 1204), (949, 1101), (954, 425), (256, 438))
+        #expect(accurate.isTrueSquare(width: 1200, height: 1600))
+        #expect(!cornerOut.isTrueSquare(width: 1200, height: 1600))
+    }
+
     @Test func cropsADiscToASquareAroundIt() throws {
         let image = try frame(rotationDegrees: 0) { context, side in
             context.setFillColor(CGColor(red: 0.05, green: 0.05, blue: 0.05, alpha: 1))
@@ -108,25 +146,45 @@ struct PhotoPipelineTests {
         #expect(result.width == 2048 && result.height == 2048)
     }
 
+    /// The resize used to blend in the empty space past the crop, leaving a dark line along the edges.
+    @Test func leavesNoDarkLineAlongTheEdges() throws {
+        let image = try frame(rotationDegrees: 0) { _, _ in }
+        let output = try #require(PhotoPipeline.process(image: image, lens: .ultraWide))
+        let result = try decoded(output.jpeg)
+        // Fractions that land exactly on the outermost pixels, given how `brightness` samples.
+        let onePixel: CGFloat = 1.0 / 2048
+        for position in [0.1, 0.5, 0.9] as [CGFloat] {
+            #expect(try brightness(result, x: position, y: onePixel) > 200, "top at \(position)")
+            #expect(try brightness(result, x: position, y: 1) > 200, "bottom at \(position)")
+            #expect(try brightness(result, x: 0, y: position) > 200, "left at \(position)")
+            #expect(try brightness(result, x: 1 - onePixel, y: position) > 200, "right at \(position)")
+        }
+    }
+
     /// Runs on real photos when they're present, and writes results to review by eye. These stay
     /// out of git, so this does nothing on a fresh clone.
     @Test func processesRealPhotosIfPresent() throws {
         let root = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Fixtures/originals")
-        let session = root.appending(path: "2026-11-05T011906")
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: session.path()) else { return }
+        // Only sessions shot on the ultra-wide, which is what the size check in detection expects.
+        guard let sessions = try? FileManager.default.contentsOfDirectory(atPath: root.path()) else { return }
+        let ultraWide = sessions.filter { $0.hasPrefix("2026-") && $0 >= "2026-11-05T011906" }.sorted()
         let outputDirectory = root.appending(path: "pipeline-output")
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
-        for name in names.sorted() where name.hasSuffix(".heic") {
-            let image = try #require(CIImage(contentsOf: session.appending(path: name), options: [.applyOrientationProperty: true]))
-            for degrees in [0, 6, -12, 40] as [CGFloat] {
-                let rotated = degrees == 0 ? image : Self.rotated(image, degrees: degrees)
-                let output = try #require(PhotoPipeline.process(image: rotated, lens: .ultraWide))
-                let stem = name.replacingOccurrences(of: ".heic", with: "")
-                let file = "\(stem)-tilt\(Int(degrees))-\(output.cropKind.rawValue).jpg"
-                try output.jpeg.write(to: outputDirectory.appending(path: file))
-                print("PIPELINE \(file) \(output.jpeg.count / 1024)KB")
+        for sessionName in ultraWide {
+            let session = root.appending(path: sessionName)
+            let names = try FileManager.default.contentsOfDirectory(atPath: session.path())
+            for name in names.sorted() where name.hasSuffix(".heic") {
+                let image = try #require(CIImage(contentsOf: session.appending(path: name), options: [.applyOrientationProperty: true]))
+                for degrees in [0, 6, -12, 40] as [CGFloat] {
+                    let rotated = degrees == 0 ? image : Self.rotated(image, degrees: degrees)
+                    let output = try #require(PhotoPipeline.process(image: rotated, lens: .ultraWide))
+                    let stem = name.replacingOccurrences(of: ".heic", with: "")
+                    let file = "\(sessionName.suffix(6))-\(stem)-tilt\(Int(degrees))-\(output.cropKind.rawValue).jpg"
+                    try output.jpeg.write(to: outputDirectory.appending(path: file))
+                    print("PIPELINE \(file) \(output.jpeg.count / 1024)KB")
+                }
             }
         }
     }

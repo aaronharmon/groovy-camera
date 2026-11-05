@@ -10,6 +10,39 @@ struct RecordQuad: Equatable, Sendable {
 }
 
 extension RecordQuad {
+    /// The corners in pixels, since normalized coordinates aren't square.
+    private func pixels(width: CGFloat, height: CGFloat) -> (tl: CGPoint, tr: CGPoint, br: CGPoint, bl: CGPoint) {
+        func scaled(_ point: CGPoint) -> CGPoint { CGPoint(x: point.x * width, y: point.y * height) }
+        return (scaled(topLeft), scaled(topRight), scaled(bottomRight), scaled(bottomLeft))
+    }
+
+    /// The square a sleeve really is, given the phone is level: where it is, how it's turned and
+    /// how big it is. Averaging all four edges evens out the noise in any single corner.
+    func fittedSquare(width: CGFloat, height: CGFloat) -> (center: CGPoint, radians: CGFloat, side: CGFloat) {
+        let p = pixels(width: width, height: height)
+        let center = CGPoint(x: (p.tl.x + p.tr.x + p.br.x + p.bl.x) / 4, y: (p.tl.y + p.tr.y + p.br.y + p.bl.y) / 4)
+        let top = atan2(p.tr.y - p.tl.y, p.tr.x - p.tl.x)
+        let bottom = atan2(p.br.y - p.bl.y, p.br.x - p.bl.x)
+        let left = atan2(p.tl.y - p.bl.y, p.tl.x - p.bl.x) - .pi / 2
+        let right = atan2(p.tr.y - p.br.y, p.tr.x - p.br.x) - .pi / 2
+        let side = (hypot(p.tr.x - p.tl.x, p.tr.y - p.tl.y) + hypot(p.br.x - p.bl.x, p.br.y - p.bl.y)
+            + hypot(p.tl.x - p.bl.x, p.tl.y - p.bl.y) + hypot(p.tr.x - p.br.x, p.tr.y - p.br.y)) / 4
+        return (center, (top + bottom + left + right) / 4, side)
+    }
+
+    /// Vision also proposes rectangles with one corner off, which are often the largest on offer.
+    /// A sleeve seen from a level phone has equal sides and parallel edges.
+    func isTrueSquare(width: CGFloat, height: CGFloat) -> Bool {
+        let p = pixels(width: width, height: height)
+        let sides = [
+            hypot(p.tr.x - p.tl.x, p.tr.y - p.tl.y), hypot(p.br.x - p.bl.x, p.br.y - p.bl.y),
+            hypot(p.tl.x - p.bl.x, p.tl.y - p.bl.y), hypot(p.tr.x - p.br.x, p.tr.y - p.br.y),
+        ]
+        guard let shortest = sides.min(), let longest = sides.max(), shortest > 0, longest / shortest <= 1.05 else { return false }
+        func degrees(_ a: CGPoint, _ b: CGPoint) -> CGFloat { atan2(b.y - a.y, b.x - a.x) * 180 / .pi }
+        return abs(degrees(p.tl, p.tr) - degrees(p.bl, p.br)) <= 3 && abs(degrees(p.bl, p.tl) - degrees(p.br, p.tr)) <= 3
+    }
+
     /// A square looks the same turned by a quarter, so its corners alone can't say which way is up.
     /// Straightening by the smallest rotation keeps the top of the record toward the top of the phone.
     func turnedToSmallestRotation(aspect: CGFloat) -> RecordQuad {
@@ -20,6 +53,39 @@ extension RecordQuad {
             quad = RecordQuad(topLeft: quad.bottomLeft, topRight: quad.topLeft, bottomRight: quad.topRight, bottomLeft: quad.bottomRight)
         }
         return self
+    }
+}
+
+/// Finds where the table ends in brightness profiles that run from the table in toward the record.
+enum RecordEdge {
+    /// Smallest step in brightness that counts. A cream sleeve on a white table is about 0.08, and
+    /// the table's own noise, averaged along a segment, is well under 0.01.
+    private static let minimumStep: Float = 0.035
+    /// Compared over this distance, so the slow falloff of light across the table isn't an edge.
+    private static let stepDistance = 8
+    private static let tableSamples = 12
+    /// The change must last this long, so a speck or a thin line on the table doesn't count.
+    private static let sustainedSamples = 6
+    /// Below this share of segments agreeing there's an edge, the side is left alone.
+    private static let minimumAgreement = 0.5
+
+    /// The first lasting change away from the table, or nil if the profile never leaves it.
+    static func firstChange(in profile: [Float]) -> Int? {
+        guard profile.count > tableSamples + stepDistance + sustainedSamples else { return nil }
+        for depth in (tableSamples + stepDistance)..<(profile.count - sustainedSamples) {
+            let tableEnd = depth - stepDistance
+            // The median, so a speck passing through this window doesn't look like the table changing.
+            let table = profile[(tableEnd - tableSamples)..<tableEnd].sorted()[tableSamples / 2]
+            let isSustained = profile[depth..<(depth + sustainedSamples)].allSatisfy { abs($0 - table) >= minimumStep }
+            if isSustained { return depth }
+        }
+        return nil
+    }
+
+    static func depth(acrossProfiles profiles: [[Float]]) -> Int? {
+        let found = profiles.compactMap(firstChange(in:)).sorted()
+        guard !found.isEmpty, Double(found.count) >= Double(profiles.count) * minimumAgreement else { return nil }
+        return found[found.count / 2]
     }
 }
 
@@ -70,6 +136,7 @@ enum RecordDetector {
                 bottomRight: observation.bottomRight,
                 bottomLeft: observation.bottomLeft
             )
+            guard quad.isTrueSquare(width: width, height: height) else { return nil }
             return (quad.turnedToSmallestRotation(aspect: width / height), side)
         }
         return candidates.max { $0.1 < $1.1 }?.0

@@ -22,6 +22,9 @@ struct Slot: Hashable, Comparable, Sendable {
         }
     }
 
+    /// The front, back and Side A are where a record prints its name.
+    var isReadForName: Bool { (1...3).contains(number) }
+
     /// What goes in the viewfinder's label, such as "03 · Side A".
     var title: String {
         let label = switch number {

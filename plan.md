@@ -1,6 +1,6 @@
 # Groovy Camera — Build Plan
 
-Based on `groovy-camera-spec.md` (Nov 4, 2026). Status: **M0 finished on the owner's light and two records. M1 is built but not yet checked on the phone. M2 is next.** The wider set of 10–15 test records is still to shoot (see M0).
+Based on `groovy-camera-spec.md` (Nov 4, 2026). Status: **M0 finished on the owner's light and two records. M1 is built but not yet checked on the phone. M2 is being built.** The wider set of 10–15 test records is still to shoot (see M0).
 
 ## 1. Approach
 
@@ -102,6 +102,8 @@ Focus locks on the first shot and holds, including for gatefolds, since the heig
 3. **Validation:** both values must actually appear in the recognized text (fuzzy match). This stops the model filling in a plausible album from its own knowledge.
 4. **Fallback:** if the model refuses (safety filters can trigger on album titles) or validation fails, use a simple rule based on the largest and most prominent text. If that fails too, use the `untitled-…` name.
 5. A name you've edited is never overwritten by a later read.
+6. A name needs a distinct artist and album. If the model gives only the artist, it looks again through the small print, then the next read. A repeated artist is kept only if nothing better turns up, since some albums are self-titled.
+7. Reading stops at the first full name that checks out, since most covers need only one read and each costs seconds. The prominent-text fallback runs only once Done has closed the record and every read has finished.
 
 Done doesn't wait for naming. Uploads for a record wait until its reads finish or time out, and this resumes after a relaunch.
 
@@ -149,7 +151,8 @@ Each milestone ends with something you can try on the phone. Simulator builds an
 - Text reading, Foundation Models extraction, validation, fallback, name chip and editing, final-name toast, slugs, `-2` collisions, `untitled-YYYY-MM-DD-N`.
 - Keep originals stays on until Settings arrives in M3, because the setting needs somewhere to live and M4 still needs originals to measure.
 - **Tests:** slug and collision rules; extraction accuracy run across all the fixtures, with the score reported.
-- **Done when (on device):** the name is right without typing on the large majority of fixtures. I'd aim for 90%, adjusted once we see real results.
+- **So far:** Foundation Models doesn't answer in the simulator, where the test falls back to the prominent-text rule. Run on a Mac across 23 photos of two records, 21 gave a distinct artist and album, and the album was the right one on 22. Remaining faults are text recognition's misread letters ("Licht" for "Light") and logo text joining the artist's name ("Berlioz Rea Victor"), which the name chip fixes. This doesn't count until it's run on the phone with more records.
+- **Done when (on device):** most records get a recognizable artist and album without typing. A name that's a bit off is fine, because the owner fixes those by hand, so there's no exact accuracy target.
 
 ### M3: Cloudflare
 

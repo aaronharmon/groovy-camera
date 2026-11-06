@@ -10,6 +10,16 @@ final class Record {
     var createdAt: Date
     var isOpen: Bool
     var skippedSlots: [Int]
+    /// "Artist — Title". Nil until a name is found.
+    var name: String?
+    /// An answer with no distinct album, such as the artist twice. Reading carries on hoping for
+    /// better, and this is used only if nothing better turns up, as some albums are self-titled.
+    var partialName: String?
+    var isNameEdited: Bool = false
+    /// Set when the toast ends. The folder is fixed from here on, and uploads may begin.
+    var isNameFinal: Bool = false
+    /// The folder on R2, worked out only once the name is final.
+    var folderSlug: String?
     @Relationship(deleteRule: .cascade, inverse: \Photo.record) var photos: [Photo]
 
     init(sessionID: String) {
@@ -41,6 +51,8 @@ final class Photo {
     var stateValue: String
     var attempts: Int
     var cropKindValue: String?
+    var isTextRead: Bool = false
+    var recognizedLinesData: Data?
     var record: Record?
 
     init(slot: Slot) {
@@ -56,6 +68,11 @@ final class Photo {
     var state: State {
         get { State(rawValue: stateValue) ?? .failed }
         set { stateValue = newValue.rawValue }
+    }
+
+    var recognizedLines: [TextLine] {
+        get { recognizedLinesData.flatMap { try? JSONDecoder().decode([TextLine].self, from: $0) } ?? [] }
+        set { recognizedLinesData = try? JSONEncoder().encode(newValue) }
     }
 
     var cropKind: PhotoPipeline.CropKind? {

@@ -43,6 +43,9 @@ final class SessionController {
     private(set) var captureFailed = false
 
     var canDiscard: Bool { !state.shot.isEmpty }
+    var currentRecord: Record? { record }
+    /// Called whenever a photo finishes processing or a record closes, which naming may be waiting on.
+    var onProgress: (() -> Void)?
 
     /// A photo that crashes the app gets this many tries, so it can't stop the app from opening.
     private static let maxAttempts = 3
@@ -119,6 +122,7 @@ final class SessionController {
         record.isOpen = false
         save()
         startNewSession()
+        onProgress?()
     }
 
     func discard() {
@@ -175,6 +179,7 @@ final class SessionController {
             files.remove(job.location)
         }
         refresh()
+        onProgress?()
         processNext()
     }
 
@@ -241,6 +246,8 @@ final class SessionController {
     private func removeReplacedPhotos(by newest: Photo) {
         guard let record = newest.record else { return }
         for photo in record.photos where photo.id != newest.id && photo.slotNumber == newest.slotNumber {
+            // The new photo may read differently, unless the name was typed by hand.
+            if photo.isTextRead, !record.isNameEdited { record.name = nil }
             files.remove(PhotoLocation(sessionID: record.sessionID, photoID: photo.id))
             context.delete(photo)
         }

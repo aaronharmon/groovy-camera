@@ -6,6 +6,8 @@ import SwiftUI
 struct CameraScreen: View {
     @State private var model: CameraModel
     @State private var isConfirmingDiscard = false
+    @State private var editingRecord: Record?
+    @State private var nameDraft = ""
 
     init(context: ModelContext) {
         _model = State(initialValue: CameraModel(context: context))
@@ -25,7 +27,20 @@ struct CameraScreen: View {
             }
             .padding(.horizontal)
 
+            if let record = session.currentRecord {
+                NameChip(name: record.name ?? record.partialName) { edit(record) }
+            }
+
             Viewfinder(model: model)
+                .overlay(alignment: .top) {
+                    if let record = model.naming.toastRecord {
+                        NameToast(name: record.name) {
+                            model.naming.beginEditingToast()
+                            edit(record)
+                        }
+                        .padding(.top, 8)
+                    }
+                }
 
             if let notice {
                 Text(notice.text)
@@ -52,6 +67,27 @@ struct CameraScreen: View {
         } message: {
             Text("They'll be deleted from this phone.")
         }
+        .alert("Record name", isPresented: isEditingName) {
+            TextField("Artist — Title", text: $nameDraft)
+            Button("Save") { finishEditing(saving: true) }
+            Button("Cancel", role: .cancel) { finishEditing(saving: false) }
+        }
+    }
+
+    private var isEditingName: Binding<Bool> {
+        Binding(get: { editingRecord != nil }, set: { _ in })
+    }
+
+    private func edit(_ record: Record) {
+        nameDraft = record.name ?? record.partialName ?? ""
+        editingRecord = record
+    }
+
+    private func finishEditing(saving: Bool) {
+        guard let record = editingRecord else { return }
+        if saving { model.naming.setName(nameDraft, for: record) }
+        if record == model.naming.toastRecord { model.naming.endEditingToast() }
+        editingRecord = nil
     }
 
     private var controls: some View {
@@ -92,6 +128,44 @@ struct CameraScreen: View {
         case .set(let isNeutral):
             return isNeutral ? nil : ("White isn't fully neutral. Clear the table and try again.", true)
         }
+    }
+}
+
+/// The record's name as soon as it's read. Tapping fixes it.
+private struct NameChip: View {
+    let name: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(name ?? "Reading name…")
+                .font(.subheadline)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.thinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Shows a finished record's final name for a few seconds, without blocking the next record.
+private struct NameToast: View {
+    let name: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text(name ?? "Untitled").font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text("Tap to fix the name").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
     }
 }
 

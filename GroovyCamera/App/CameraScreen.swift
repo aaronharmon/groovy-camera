@@ -4,14 +4,10 @@ import SwiftUI
 
 /// The home screen. Opens straight into the viewfinder with a session ready.
 struct CameraScreen: View {
-    @State private var model: CameraModel
+    let model: CameraModel
     @State private var isConfirmingDiscard = false
-    @State private var editingRecord: Record?
-    @State private var nameDraft = ""
-
-    init(context: ModelContext) {
-        _model = State(initialValue: CameraModel(context: context))
-    }
+    /// Briefly true after Set White finishes, so a good result is seen rather than just assumed.
+    @State private var isShowingWhiteResult = false
 
     private var session: SessionController { model.session }
 
@@ -21,31 +17,35 @@ struct CameraScreen: View {
                 Text(session.state.currentSlot?.title ?? "All sides shot")
                     .font(.headline.monospacedDigit())
                 Spacer()
+                if let level = whiteLevel {
+                    Text(level.text)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(level.color)
+                }
                 Button("Set White") { model.camera.setWhite() }
                     .buttonStyle(.bordered)
                     .disabled(model.status.white == .setting)
             }
             .padding(.horizontal)
 
-            if let record = session.currentRecord {
-                NameChip(name: record.name ?? record.partialName) { edit(record) }
+            HStack {
+                AdjustmentControl(title: "Exposure", value: model.status.exposureBias, adjustment: .exposure) {
+                    model.camera.setExposureBias($0)
+                }
+                Spacer()
+                AdjustmentControl(title: "Warmth", value: model.status.warmth, adjustment: .warmth) {
+                    model.camera.setWarmth($0)
+                }
             }
+            .disabled(model.status.white == .setting)
+            .padding(.horizontal)
 
             Viewfinder(model: model)
-                .overlay(alignment: .top) {
-                    if let record = model.naming.toastRecord {
-                        NameToast(name: record.name) {
-                            model.naming.beginEditingToast()
-                            edit(record)
-                        }
-                        .padding(.top, 8)
-                    }
-                }
 
             if let notice {
                 Text(notice.text)
                     .font(.subheadline)
-                    .foregroundStyle(notice.isWarning ? .red : .secondary)
+                    .foregroundStyle(notice.color)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
             }
@@ -58,6 +58,14 @@ struct CameraScreen: View {
         }
         .padding(.bottom, 8)
         .task { await model.start() }
+        .task(id: isShowingWhiteResult) {
+            guard isShowingWhiteResult else { return }
+            try? await Task.sleep(for: .seconds(4))
+            isShowingWhiteResult = false
+        }
+        .onChange(of: model.status.white) { old, new in
+            if old == .setting, case .set = new { isShowingWhiteResult = true }
+        }
         // The volume buttons work as the shutter, which avoids nudging the phone on its tripod.
         .onCameraCaptureEvent { event in
             if event.phase == .ended { model.shoot() }
@@ -67,27 +75,6 @@ struct CameraScreen: View {
         } message: {
             Text("They'll be deleted from this phone.")
         }
-        .alert("Record name", isPresented: isEditingName) {
-            TextField("Artist — Title", text: $nameDraft)
-            Button("Save") { finishEditing(saving: true) }
-            Button("Cancel", role: .cancel) { finishEditing(saving: false) }
-        }
-    }
-
-    private var isEditingName: Binding<Bool> {
-        Binding(get: { editingRecord != nil }, set: { _ in })
-    }
-
-    private func edit(_ record: Record) {
-        nameDraft = record.name ?? record.partialName ?? ""
-        editingRecord = record
-    }
-
-    private func finishEditing(saving: Bool) {
-        guard let record = editingRecord else { return }
-        if saving { model.naming.setName(nameDraft, for: record) }
-        if record == model.naming.toastRecord { model.naming.endEditingToast() }
-        editingRecord = nil
     }
 
     private var controls: some View {
@@ -118,58 +105,62 @@ struct CameraScreen: View {
         .padding(.horizontal)
     }
 
-    private var notice: (text: String, isWarning: Bool)? {
-        if let message = model.status.message { return (message, true) }
-        if session.captureFailed { return ("The last photo wasn't saved. Shoot it again.", true) }
-        if model.isHot { return ("The phone is hot, so photos will take longer to finish.", true) }
+    private var notice: (text: String, color: Color)? {
+        if let message = model.status.message { return (message, .red) }
+        if session.captureFailed { return ("The last photo wasn't saved. Shoot it again.", .red) }
+        if model.isHot { return ("The phone is hot, so photos will take longer to finish.", .red) }
         switch model.status.white {
-        case .notSet: return ("Clear the table, then tap Set White.", false)
-        case .setting: return ("Setting white…", false)
-        case .set(let isNeutral):
-            return isNeutral ? nil : ("White isn't fully neutral. Clear the table and try again.", true)
-        }
-    }
-}
-
-/// The record's name as soon as it's read. Tapping fixes it.
-private struct NameChip: View {
-    let name: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(name ?? "Reading name…")
-                .font(.subheadline)
-                .lineLimit(1)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.thinMaterial, in: Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// Shows a finished record's final name for a few seconds, without blocking the next record.
-private struct NameToast: View {
-    let name: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Text(name ?? "Untitled").font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text("Tap to fix the name").font(.caption).foregroundStyle(.secondary)
+        case .notSet: return ("Clear the table, then tap Set White.", .secondary)
+        case .setting: return ("Setting white. Keep the table clear…", .secondary)
+        case .set(let result):
+            guard let result else { return nil }
+            let percent = Int((result.brightness * 100).rounded())
+            switch result.problem {
+            case nil: return isShowingWhiteResult ? ("White set: \(percent)%.", .green) : nil
+            case .tooDim: return ("The light is dim: white only reaches \(percent)% at the camera's limit. More light would help.", .red)
+            case .tooBright: return ("White is clipping. Tap Set White again.", .red)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal)
+    }
+
+    /// Always on screen, so it's clear whether white is set and how it measured.
+    private var whiteLevel: (text: String, color: Color)? {
+        guard case .set(let result) = model.status.white else { return nil }
+        guard let result else { return ("White set", .secondary) }
+        return ("White \(Int((result.brightness * 100).rounded()))%", result.problem == nil ? .green : .orange)
     }
 }
 
-/// The square viewfinder with its guides.
+/// A − / + control for one of the user's adjustments to the locked white.
+private struct AdjustmentControl: View {
+    let title: String
+    let value: Double
+    let adjustment: Adjustment
+    let change: (Double) -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title).foregroundStyle(.secondary)
+            Button { change(value - adjustment.step) } label: { Image(systemName: "minus") }
+                .disabled(value <= adjustment.range.lowerBound)
+                .accessibilityLabel("Less \(title.lowercased())")
+            Text(Self.label(value))
+                .monospacedDigit()
+                .frame(minWidth: 32)
+            Button { change(value + adjustment.step) } label: { Image(systemName: "plus") }
+                .disabled(value >= adjustment.range.upperBound)
+                .accessibilityLabel("More \(title.lowercased())")
+        }
+        .font(.subheadline)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+
+    private static func label(_ value: Double) -> String {
+        value == 0 ? "0" : String(format: "%+.1f", value).replacingOccurrences(of: ".0", with: "")
+    }
+}
+
 private struct Viewfinder: View {
     let model: CameraModel
 

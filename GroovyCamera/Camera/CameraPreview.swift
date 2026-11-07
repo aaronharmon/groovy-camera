@@ -10,6 +10,9 @@ struct CameraPreview: UIViewRepresentable {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        // The preview is larger than the viewfinder and clipped to it, but clipping doesn't stop
+        // the hidden part catching taps, and it overlaps the Set White button.
+        view.isUserInteractionEnabled = false
         return view
     }
 

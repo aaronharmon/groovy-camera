@@ -1,6 +1,6 @@
 # Groovy Camera
 
-An iOS camera app for photographing LPs for listings. Every shot comes out square, color-correct, cropped to the sleeve, named after the album and uploaded to Cloudflare R2, with no typing or editing.
+An iOS camera app for photographing LPs for listings. Every shot comes out square, color-correct, cropped to the sleeve, filed by date and time and uploaded to Cloudflare R2, with no typing or editing.
 
 - `groovy-camera-spec.md` says what the product does.
 - `plan.md` says how we're building it, including the decisions behind any change from the original spec, and the milestones.
@@ -39,8 +39,7 @@ Before every commit, read the staged diff with this list in mind. AWS's publishe
 The simulator has no camera, and the color and detection results that matter come from real photos on a real stand.
 
 - Keep image pipeline, naming, session and upload logic independent of the camera, so they run on saved images.
-- Unit tests cover logic: slot sequencing, slugs, signing, queue state and crash recovery. Fixture tests run when the local originals are present, and report measurements such as color error, corner error, fallback rate and naming accuracy rather than only pass or fail.
-- Foundation Models results only count when run on the phone.
+- Unit tests cover logic: slot sequencing, folder and file names, signing, queue state and crash recovery. Fixture tests run when the local originals are present, and report measurements such as color error, corner error and fallback rate rather than only pass or fail.
 - If a change needs a device check, say exactly what to shoot and what to look for.
 
 ## Commands
@@ -53,16 +52,16 @@ xcodebuild test -project GroovyCamera.xcodeproj -scheme GroovyCamera \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Target is iOS 26 or newer, on iPhones with Apple Intelligence.
+Target is iOS 26 or newer.
 
 ## Things that are easy to break
 
 These come from decisions in `plan.md`, and the reasons aren't obvious from the code.
 
 - **Never lose a photo.** The original is on disk before anything else happens, and the queue processes one shot at a time and resumes after a crash. A slow queue is acceptable. The shutter never waits on processing.
-- **Set white once, then leave it alone.** Set White on the empty table fixes white balance and exposure (white at 90–95%, never clipped) until the user sets it again. Don't add live or per-photo adjustment: the light doesn't change, and reading the image while a record is in frame is what broke dark sleeves. Focus locks on the first shot and holds, because the tripod height is fixed.
+- **Set white once, then leave it alone.** Set White on the empty table locks the white balance and exposure the camera's own auto modes pick there, until the user sets it again. The user's − / + exposure (±4 stops) and warmth adjustments shift that locked setting; they're kept, not live. The app doesn't correct color itself: doing that from the preview swung past white. Don't add live or per-photo adjustment: the light doesn't change, and reading the image while a record is in frame is what broke dark sleeves. Focus locks on the first shot and holds, because the tripod height is fixed.
 - **Rotate and crop only: never warp a record's shape.** No perspective correction and no uneven scaling. Warping to detected corners made a back cover look tilted in 3D. The level keeps the phone flat, which is what prevents keystoning.
-- **Uploads start after Done, once the name is final and its toast has ended.** Retakes, discards and name fixes before that never touch R2.
-- **R2 paths are worked out at upload time** from a validated slug and a known filename, always under `records/`. Local files are stored by id, so a name change never moves one.
+- **Uploads start after Done.** Retakes and discards before that never touch R2.
+- **R2 paths are worked out at upload time** from the record's date-and-time folder and a known filename, always under `records/`. Local files are stored by id.
 - **Ignore device orientation.** A phone lying flat doesn't report a useful one, so the app is portrait-locked and "up" is the top of the phone.
 - **Background uploads must work on a locked phone,** so photo files and the Keychain token must stay accessible after first unlock. The token is this-device-only.

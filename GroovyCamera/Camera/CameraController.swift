@@ -4,7 +4,8 @@ import QuartzCore
 enum WhiteState: Equatable, Sendable {
     case notSet
     case setting
-    case set(isNeutral: Bool)
+    /// The result is nil for a setting saved before results were recorded.
+    case set(WhiteResult?)
 }
 
 struct CameraStatus: Sendable {
@@ -12,6 +13,8 @@ struct CameraStatus: Sendable {
     var white = WhiteState.notSet
     var gains = ColorGains(red: 1, green: 1, blue: 1)
     var exposure = ExposureSetting(duration: 0, iso: 0)
+    var exposureBias = 0.0
+    var warmth = 0.0
     var lensPosition = 0.0
     var revision = 0
 }
@@ -41,14 +44,21 @@ final class CameraController: NSObject, @unchecked Sendable {
     private var inFlight: [Int64: AVCapturePhotoCaptureDelegate] = [:]
 
     private var isFocusLocked = false
-    private var lastUpdate: CFTimeInterval = 0
-    private var deadline: CFTimeInterval = 0
-    private var settledReadings = 0
-    private var target: (gains: ColorGains, exposure: ExposureSetting)?
+    /// When Set White started, while the camera is metering the empty table.
+    private var meteringStarted: CFTimeInterval?
+    /// The locked setting, before the user's exposure adjustment.
+    private var whiteSetting: WhiteSetting?
+    private var exposureBias = Adjustment.exposure.load()
+    private var warmth = Adjustment.warmth.load()
+    private var lastSample: CFTimeInterval = 0
 
-    private static let updateInterval: CFTimeInterval = 0.2
-    private static let settingTimeLimit: CFTimeInterval = 6
-    private static let settledReadingsNeeded = 2
+    /// How often the table is read while the camera meters it.
+    private static let sampleInterval: CFTimeInterval = 0.4
+    private static let meteringMinimum: CFTimeInterval = 1
+    private static let meteringLimit: CFTimeInterval = 4
+    /// 1/15 s showed shake from touching the phone on its tripod. A multiple of 1/60 s also avoids
+    /// flicker from 60 Hz lighting.
+    private static let longestShutter = 1.0 / 30
 
     init(files: PhotoFiles) {
         self.files = files
@@ -68,11 +78,34 @@ final class CameraController: NSObject, @unchecked Sendable {
         queue.async { [self] in
             guard let device else { return }
             status.white = .setting
-            deadline = CACurrentMediaTime() + Self.settingTimeLimit
-            settledReadings = 0
-            target = nil
+            meteringStarted = CACurrentMediaTime()
             isFocusLocked = false
-            withConfiguration(device) { $0.focusMode = .continuousAutoFocus }
+            withConfiguration(device) {
+                $0.focusMode = .continuousAutoFocus
+                $0.exposureMode = .continuousAutoExposure
+                $0.activeMaxExposureDuration = CMTime(seconds: Self.longestShutter(for: $0), preferredTimescale: 1_000_000)
+                $0.whiteBalanceMode = .continuousAutoWhiteBalance
+            }
+            publish()
+        }
+    }
+
+    /// Makes the locked exposure brighter or darker, in stops from what the camera metered.
+    func setExposureBias(_ bias: Double) {
+        queue.async { [self] in
+            exposureBias = Adjustment.exposure.clamped(bias)
+            Adjustment.exposure.save(exposureBias)
+            if let whiteSetting { apply(gains: whiteSetting.gains, exposure: whiteSetting.exposure) }
+            publish()
+        }
+    }
+
+    /// Makes the locked white balance warmer or cooler than the camera's own choice.
+    func setWarmth(_ steps: Double) {
+        queue.async { [self] in
+            warmth = Adjustment.warmth.clamped(steps)
+            Adjustment.warmth.save(warmth)
+            if let whiteSetting { apply(gains: whiteSetting.gains, exposure: whiteSetting.exposure) }
             publish()
         }
     }
@@ -175,8 +208,9 @@ final class CameraController: NSObject, @unchecked Sendable {
         status.revision += 1
 
         if let saved = WhiteSetting.load(for: lens) {
+            whiteSetting = saved
             apply(gains: saved.gains, exposure: saved.exposure)
-            status.white = .set(isNeutral: saved.isNeutral)
+            status.white = .set(saved.result)
         } else {
             withConfiguration(camera) {
                 $0.exposureMode = .continuousAutoExposure
@@ -235,77 +269,106 @@ final class CameraController: NSObject, @unchecked Sendable {
             status.exposure = ExposureSetting(duration: device.exposureDuration.seconds, iso: Double(device.iso))
             status.lensPosition = Double(device.lensPosition)
         }
+        status.exposureBias = exposureBias
+        status.warmth = warmth
         onStatus?(status)
     }
 
     // MARK: - Setting white
 
-    private func exposureLimits(of device: AVCaptureDevice) -> ExposureLimits {
-        ExposureLimits(
-            minDuration: device.activeFormat.minExposureDuration.seconds,
-            maxDuration: min(device.activeFormat.maxExposureDuration.seconds, 1.0 / 8),
-            minISO: Double(device.activeFormat.minISO),
-            maxISO: Double(device.activeFormat.maxISO)
-        )
+    private static func longestShutter(for device: AVCaptureDevice) -> Double {
+        min(max(longestShutter, device.activeFormat.minExposureDuration.seconds), device.activeFormat.maxExposureDuration.seconds)
     }
 
-    private func apply(gains: ColorGains, exposure: ExposureSetting) {
+    /// Restores a saved setting. Both stay fixed until Set White runs again.
+    private func apply(gains: ColorGains, exposure metered: ExposureSetting) {
         guard let device else { return }
-        let limits = exposureLimits(of: device)
+        let format = device.activeFormat
         let maxGain = Double(device.maxWhiteBalanceGain)
+        let minDuration = format.minExposureDuration.seconds
+        let maxDuration = format.maxExposureDuration.seconds
+        // Brightening can lengthen the shutter only up to the shake limit, unless the metered
+        // shutter was already longer.
+        let longest = max(Self.longestShutter(for: device), min(metered.duration, maxDuration))
+        let exposure = ExposureBias.exposure(
+            metered,
+            bias: exposureBias,
+            isoRange: Double(format.minISO)...Double(format.maxISO),
+            durationRange: minDuration...max(longest, minDuration)
+        )
         withConfiguration(device) {
             $0.setExposureModeCustom(
-                duration: CMTime(seconds: min(max(exposure.duration, limits.minDuration), limits.maxDuration), preferredTimescale: 1_000_000),
-                iso: Float(min(max(exposure.iso, limits.minISO), limits.maxISO))
+                duration: CMTime(seconds: exposure.duration, preferredTimescale: 1_000_000),
+                iso: Float(exposure.iso)
             )
-            $0.setWhiteBalanceModeLocked(with: AVCaptureDevice.WhiteBalanceGains(
-                redGain: Float(min(max(gains.red, 1), maxGain)),
-                greenGain: Float(min(max(gains.green, 1), maxGain)),
-                blueGain: Float(min(max(gains.blue, 1), maxGain))
-            ))
+            lockGains(Self.gains(gains, warmth: warmth, on: $0), on: $0, maxGain: maxGain)
         }
     }
 
-    private func updateSetting(with sample: BackgroundSample, device: AVCaptureDevice, now: CFTimeInterval) {
-        settledReadings = CameraLoop.isSettled(sample) ? settledReadings + 1 : 0
-        let isDone = settledReadings >= Self.settledReadingsNeeded
-        if isDone || now >= deadline {
-            let current = device.deviceWhiteBalanceGains
-            let setting = WhiteSetting(
-                gains: target?.gains ?? ColorGains(red: Double(current.redGain), green: Double(current.greenGain), blue: Double(current.blueGain)),
-                exposure: target?.exposure ?? ExposureSetting(duration: device.exposureDuration.seconds, iso: Double(device.iso)),
-                isNeutral: isDone
-            )
-            apply(gains: setting.gains, exposure: setting.exposure)
-            setting.save(for: lens)
-            status.white = .set(isNeutral: isDone)
-            publish()
-            return
-        }
-
-        let current = device.deviceWhiteBalanceGains
-        let gains = CameraLoop.nextGains(
-            current: ColorGains(red: Double(current.redGain), green: Double(current.greenGain), blue: Double(current.blueGain)),
-            sample: sample,
-            maxGain: Double(device.maxWhiteBalanceGain)
+    /// Moves the gains to correct for a warmer or cooler light, keeping the tint, using the
+    /// camera's own conversion between gains and color temperature.
+    private static func gains(_ base: ColorGains, warmth: Double, on device: AVCaptureDevice) -> ColorGains {
+        guard warmth != 0 else { return base }
+        let maxGain = Double(device.maxWhiteBalanceGain)
+        var values = device.temperatureAndTintValues(for: AVCaptureDevice.WhiteBalanceGains(
+            redGain: Float(min(max(base.red, 1), maxGain)),
+            greenGain: Float(min(max(base.green, 1), maxGain)),
+            blueGain: Float(min(max(base.blue, 1), maxGain))
+        ))
+        values.temperature = Float(WarmthBias.temperature(Double(values.temperature), warmth: warmth))
+        let shifted = device.deviceWhiteBalanceGains(for: values)
+        // The camera needs every gain to be at least 1.
+        let smallest = Double(min(shifted.redGain, shifted.greenGain, shifted.blueGain))
+        return ColorGains(
+            red: Double(shifted.redGain) / smallest,
+            green: Double(shifted.greenGain) / smallest,
+            blue: Double(shifted.blueGain) / smallest
         )
-        let exposure = CameraLoop.nextExposure(
-            current: ExposureSetting(duration: device.exposureDuration.seconds, iso: Double(device.iso)),
-            sample: sample,
-            limits: exposureLimits(of: device)
-        )
-        target = (gains, exposure)
-        apply(gains: gains, exposure: exposure)
     }
 
+    private func lockGains(_ gains: ColorGains, on device: AVCaptureDevice, maxGain: Double) {
+        device.setWhiteBalanceModeLocked(with: AVCaptureDevice.WhiteBalanceGains(
+            redGain: Float(min(max(gains.red, 1), maxGain)),
+            greenGain: Float(min(max(gains.green, 1), maxGain)),
+            blueGain: Float(min(max(gains.blue, 1), maxGain))
+        ))
+    }
+
+    /// Waits for the camera's own auto exposure and white balance to settle on the empty table,
+    /// then locks both as they are. Nothing changes them after this, so a dark sleeve and a pale
+    /// one are shot alike.
+    private func advanceWhite(with sample: BackgroundSample, device: AVCaptureDevice, now: CFTimeInterval) {
+        guard let meteringStarted else { return }
+        let elapsed = now - meteringStarted
+        let isSteady = !device.isAdjustingExposure && !device.isAdjustingWhiteBalance
+        guard (elapsed >= Self.meteringMinimum && isSteady) || elapsed >= Self.meteringLimit else { return }
+
+        let gains = device.deviceWhiteBalanceGains
+        let exposure = ExposureSetting(duration: device.exposureDuration.seconds, iso: Double(device.iso))
+        let isOutOfLight = exposure.iso >= Double(device.activeFormat.maxISO) * 0.98
+            && exposure.duration >= Self.longestShutter(for: device) * 0.98
+        let setting = WhiteSetting(
+            gains: ColorGains(red: Double(gains.redGain), green: Double(gains.greenGain), blue: Double(gains.blueGain)),
+            exposure: exposure,
+            result: CameraLoop.judge(sample, isOutOfLight: isOutOfLight)
+        )
+        // Locked as a custom exposure and fixed gains, the same way a saved setting is restored at
+        // launch, so every session matches exactly.
+        whiteSetting = setting
+        apply(gains: setting.gains, exposure: setting.exposure)
+        setting.save(for: lens)
+        self.meteringStarted = nil
+        status.white = .set(setting.result)
+        publish()
+    }
 }
 
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard status.white == .setting else { return }
         let now = CACurrentMediaTime()
-        guard now - lastUpdate >= Self.updateInterval, let device, let buffer = sampleBuffer.imageBuffer else { return }
-        lastUpdate = now
+        guard now - lastSample >= Self.sampleInterval, let device, let buffer = sampleBuffer.imageBuffer else { return }
+        lastSample = now
 
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
@@ -319,7 +382,7 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
             layout: .bgra,
             ring: lens.emptyTable
         )
-        if let sample { updateSetting(with: sample, device: device, now: now) }
+        if let sample { advanceWhite(with: sample, device: device, now: now) }
     }
 }
 

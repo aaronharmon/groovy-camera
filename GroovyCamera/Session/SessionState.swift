@@ -22,8 +22,16 @@ struct Slot: Hashable, Comparable, Sendable {
         }
     }
 
-    /// The front, back and Side A are where a record prints its name.
-    var isReadForName: Bool { (1...3).contains(number) }
+    /// The end of its filename, such as `front` or `side-a`.
+    var fileLabel: String {
+        switch number {
+        case 1: "front"
+        case 2: "back"
+        case 3...8: "side-\(["a", "b", "c", "d", "e", "f"][number - 3])"
+        case 9: "gatefold"
+        default: "extra"
+        }
+    }
 
     /// What goes in the viewfinder's label, such as "03 · Side A".
     var title: String {

@@ -44,8 +44,6 @@ final class SessionController {
 
     var canDiscard: Bool { !state.shot.isEmpty }
     var currentRecord: Record? { record }
-    /// Called whenever a photo finishes processing or a record closes, which naming may be waiting on.
-    var onProgress: (() -> Void)?
 
     /// A photo that crashes the app gets this many tries, so it can't stop the app from opening.
     private static let maxAttempts = 3
@@ -122,7 +120,6 @@ final class SessionController {
         record.isOpen = false
         save()
         startNewSession()
-        onProgress?()
     }
 
     func discard() {
@@ -179,7 +176,6 @@ final class SessionController {
             files.remove(job.location)
         }
         refresh()
-        onProgress?()
         processNext()
     }
 
@@ -210,6 +206,14 @@ final class SessionController {
         }
         save()
 
+        // Records from before folders were stored get theirs from when they were started.
+        let allRecords = (try? context.fetch(FetchDescriptor<Record>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
+        var taken = Set(allRecords.map(\.folder))
+        for unfiled in allRecords where unfiled.folder.isEmpty {
+            unfiled.folder = RecordFolder.folder(for: unfiled.createdAt, taken: taken)
+            taken.insert(unfiled.folder)
+        }
+
         let openRecords = (try? context.fetch(FetchDescriptor<Record>(predicate: #Predicate { $0.isOpen }))) ?? []
         record = openRecords.first { !$0.photos.isEmpty }
         for empty in openRecords where empty.photos.isEmpty {
@@ -221,8 +225,11 @@ final class SessionController {
 
     // MARK: - Helpers
 
+    /// The folder comes from the first shot's time, so the whole record shares one stamp.
     private func makeRecord() -> Record {
-        let record = Record(sessionID: Self.makeSessionID())
+        let now = Date()
+        let taken = Set(((try? context.fetch(FetchDescriptor<Record>())) ?? []).map(\.folder))
+        let record = Record(sessionID: Self.makeSessionID(), folder: RecordFolder.folder(for: now, taken: taken), createdAt: now)
         context.insert(record)
         self.record = record
         return record
@@ -246,8 +253,6 @@ final class SessionController {
     private func removeReplacedPhotos(by newest: Photo) {
         guard let record = newest.record else { return }
         for photo in record.photos where photo.id != newest.id && photo.slotNumber == newest.slotNumber {
-            // The new photo may read differently, unless the name was typed by hand.
-            if photo.isTextRead, !record.isNameEdited { record.name = nil }
             files.remove(PhotoLocation(sessionID: record.sessionID, photoID: photo.id))
             context.delete(photo)
         }

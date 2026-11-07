@@ -1,12 +1,12 @@
 # Groovy Camera
 
-An iOS camera app for photographing LPs for listings. Every shot comes out square, color-correct, cropped to the sleeve, named after the album and uploaded to Cloudflare R2, with no typing or editing.
+An iOS camera app for photographing LPs for listings. Every shot comes out square, color-correct, cropped to the sleeve, filed by date and time and uploaded to Cloudflare R2, with no typing or editing.
 
 **Status: early development.** The app is currently a test screen for checking the camera on a real stand. See `groovy-camera-spec.md` for the product and `plan.md` for the build plan. MIT licensed.
 
 ## Build
 
-You need Xcode 27 or newer, [XcodeGen](https://github.com/yonaskolb/XcodeGen), and an iPhone with Apple Intelligence on iOS 26 or newer.
+You need Xcode 27 or newer, [XcodeGen](https://github.com/yonaskolb/XcodeGen), and an iPhone on iOS 26 or newer.
 
 ```sh
 cp Local.example.xcconfig Local.xcconfig   # then add your team ID and bundle ID prefix

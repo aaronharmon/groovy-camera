@@ -10,7 +10,6 @@ final class CameraModel {
     let camera: CameraController
     let level = LevelMonitor()
     let session: SessionController
-    let naming: NamingController
     private(set) var status = CameraStatus()
     private(set) var isHot = false
     private var thermalObserver: NSObjectProtocol?
@@ -19,8 +18,6 @@ final class CameraModel {
         let files = PhotoFiles()
         camera = CameraController(files: files)
         session = SessionController(context: context, files: files)
-        naming = NamingController(context: context, files: files)
-        session.onProgress = { [weak self] in self?.naming.wake() }
     }
 
     var canShoot: Bool {

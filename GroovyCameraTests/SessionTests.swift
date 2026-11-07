@@ -175,6 +175,17 @@ struct SessionControllerTests {
         #expect(FileManager.default.fileExists(atPath: files.finishedURL(ticket.location).path()))
     }
 
+    @Test func filesTheRecordUnderItsFirstShotsTime() throws {
+        let session = controller()
+        let before = Date()
+        try shoot(session)
+        try shoot(session)
+        let record = try #require(session.currentRecord)
+        #expect(record.folder == RecordFolder.stamp(for: record.createdAt))
+        #expect(record.createdAt >= before.addingTimeInterval(-1))
+        #expect(record.photos.allSatisfy { $0.record?.folder == record.folder })
+    }
+
     @Test func aFailedShotLeavesTheSlotOpen() throws {
         let session = controller()
         let ticket = try #require(session.beginCapture())

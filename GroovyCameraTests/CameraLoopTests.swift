@@ -14,60 +14,55 @@ struct CameraLoopTests {
         #expect(size?.width == 4032 && size?.height == 3024)
     }
 
-    private let limits = ExposureLimits(minDuration: 1.0 / 8000, maxDuration: 1.0 / 8, minISO: 50, maxISO: 3200)
-
-    /// Encodes a linear value the way the camera's output does.
-    private func encoded(_ linear: Double) -> Double {
-        linear <= 0.0031308 ? linear * 12.92 : 1.055 * pow(linear, 1 / 2.4) - 0.055
-    }
-
-    /// A pretend camera: warm light on a white background, with output following gains and exposure.
-    private func simulatedSample(gains: ColorGains, exposure: ExposureSetting) -> BackgroundSample {
-        let light = exposure.duration * exposure.iso * 0.1
-        let channel = { (reflected: Double, gain: Double) in min(self.encoded(reflected * gain * light), 1) }
-        let red = channel(0.9, gains.red)
-        let green = channel(0.6, gains.green)
-        let blue = channel(0.3, gains.blue)
-        let clipped = [red, green, blue].contains { $0 >= 250.0 / 255 } ? 1.0 : 0.0
-        return BackgroundSample(red: red, green: green, blue: blue, clippedFraction: clipped, sampleCount: 1000)
-    }
-
-    @Test func convergesToNeutralInsideTheBrightnessBand() {
-        var gains = ColorGains(red: 1, green: 1, blue: 1)
-        var exposure = ExposureSetting(duration: 1.0 / 60, iso: 200)
-        for _ in 0..<30 {
-            let sample = simulatedSample(gains: gains, exposure: exposure)
-            gains = CameraLoop.nextGains(current: gains, sample: sample, maxGain: 16)
-            exposure = CameraLoop.nextExposure(current: exposure, sample: sample, limits: limits)
-        }
-        let final = simulatedSample(gains: gains, exposure: exposure)
-        #expect(CameraLoop.isSettled(final), "\(final)")
-    }
-
-    @Test func recoversFromAClippedStart() {
-        var gains = ColorGains(red: 1, green: 1, blue: 1)
-        var exposure = ExposureSetting(duration: 1.0 / 15, iso: 3200)
-        for _ in 0..<60 {
-            let sample = simulatedSample(gains: gains, exposure: exposure)
-            gains = CameraLoop.nextGains(current: gains, sample: sample, maxGain: 16)
-            exposure = CameraLoop.nextExposure(current: exposure, sample: sample, limits: limits)
-        }
-        let final = simulatedSample(gains: gains, exposure: exposure)
-        #expect(CameraLoop.isSettled(final), "\(final)")
-    }
-
-    @Test func gainsStayWithinTheCameraRange() {
-        let sample = BackgroundSample(red: 0.9, green: 0.5, blue: 0.1, clippedFraction: 0, sampleCount: 1000)
-        let gains = CameraLoop.nextGains(current: ColorGains(red: 1, green: 2, blue: 3.9), sample: sample, maxGain: 4)
-        for gain in [gains.red, gains.green, gains.blue] {
-            #expect(gain >= 1 && gain <= 4)
+    @Test func passesAWhiteAtWhateverBrightnessAndColor() {
+        for level in [0.75, 0.86, 0.93] {
+            // Warm, as the camera's own white balance leaves a warm light.
+            let sample = BackgroundSample(red: level + 0.03, green: level, blue: level - 0.06, clippedFraction: 0, sampleCount: 1)
+            #expect(CameraLoop.judge(sample, isOutOfLight: false).problem == nil)
         }
     }
 
-    @Test func leavesGainsAloneWhenClipped() {
-        let current = ColorGains(red: 1.5, green: 1, blue: 2)
-        let sample = BackgroundSample(red: 1, green: 1, blue: 0.9, clippedFraction: 0.9, sampleCount: 1000)
-        #expect(CameraLoop.nextGains(current: current, sample: sample, maxGain: 16) == current)
+    @Test func saysWhatsWrongWithAPoorWhite() {
+        let dim = BackgroundSample(red: 0.64, green: 0.64, blue: 0.64, clippedFraction: 0, sampleCount: 1)
+        #expect(CameraLoop.judge(dim, isOutOfLight: true).problem == .tooDim)
+
+        let clipped = BackgroundSample(red: 0.98, green: 0.98, blue: 0.98, clippedFraction: 0.05, sampleCount: 1)
+        #expect(CameraLoop.judge(clipped, isOutOfLight: false).problem == .tooBright)
+    }
+
+    @Test func exposureBiasMovesISOFirstThenTheShutter() {
+        let metered = ExposureSetting(duration: 1.0 / 60, iso: 400)
+        let isoRange = 50.0...3200
+        let durationRange = (1.0 / 8000)...(1.0 / 30)
+
+        let darker = ExposureBias.exposure(metered, bias: -1, isoRange: isoRange, durationRange: durationRange)
+        #expect(darker == ExposureSetting(duration: 1.0 / 60, iso: 200))
+
+        // Two stops up needs ISO 1600, which is in range, so the shutter stays put.
+        let brighter = ExposureBias.exposure(metered, bias: 2, isoRange: isoRange, durationRange: durationRange)
+        #expect(brighter == ExposureSetting(duration: 1.0 / 60, iso: 1600))
+
+        // At the ISO limit, the shutter lengthens, but not past the shake limit.
+        let dim = ExposureSetting(duration: 1.0 / 60, iso: 2400)
+        let limited = ExposureBias.exposure(dim, bias: 2, isoRange: isoRange, durationRange: durationRange)
+        #expect(limited.iso == 3200 && abs(limited.duration - 1.0 / 30) < 1e-9)
+    }
+
+    @Test func adjustmentsStayInRangeAndInSteps() {
+        #expect(Adjustment.exposure.clamped(5) == 4)
+        #expect(Adjustment.exposure.clamped(-4.6) == -4)
+        #expect(Adjustment.exposure.clamped(0.4) == 0.5)
+        #expect(Adjustment.warmth.clamped(-22) == -20)
+        #expect(Adjustment.warmth.clamped(2.4) == 2)
+    }
+
+    @Test func lessWarmthCorrectsForAWarmerLight() {
+        #expect(WarmthBias.temperature(3000, warmth: 0) == 3000)
+        // Correcting for a warmer light adds blue, so the photo comes out cooler.
+        let cooler = WarmthBias.temperature(3000, warmth: -3)
+        #expect(abs(cooler - 1_000_000 / (1_000_000 / 3000.0 + 30)) < 0.001)
+        #expect(WarmthBias.temperature(3000, warmth: 3) > 3000)
+        #expect(WarmthBias.temperature(30_000, warmth: 10).isFinite)
     }
 
     @Test func whiteSettingSurvivesARelaunch() throws {
@@ -79,7 +74,7 @@ struct CameraLoopTests {
         let setting = WhiteSetting(
             gains: ColorGains(red: 1, green: 1.2, blue: 3),
             exposure: ExposureSetting(duration: 1.0 / 15, iso: 400),
-            isNeutral: true
+            result: WhiteResult(brightness: 0.92, problem: nil)
         )
         setting.save(for: .ultraWide, to: defaults)
         #expect(WhiteSetting.load(for: .ultraWide, from: defaults) == setting)
@@ -105,24 +100,13 @@ struct CameraLoopTests {
         #expect(!steep.isLevel)
     }
 
-    @Test func prefersTheFlickerSafeShutterSpeed() {
-        let sample = BackgroundSample(red: 0.92, green: 0.92, blue: 0.92, clippedFraction: 0, sampleCount: 1000)
-        let exposure = CameraLoop.nextExposure(current: ExposureSetting(duration: 1.0 / 250, iso: 3200), sample: sample, limits: limits)
-        #expect(abs(exposure.duration - limits.preferredDuration) < 0.0001)
-    }
-
-    @Test func lengthensTheShutterWhenISORunsOut() {
-        let sample = BackgroundSample(red: 0.4, green: 0.4, blue: 0.4, clippedFraction: 0, sampleCount: 1000)
-        let exposure = CameraLoop.nextExposure(current: ExposureSetting(duration: 1.0 / 15, iso: 3200), sample: sample, limits: limits)
-        #expect(exposure.iso == 3200)
-        #expect(exposure.duration > limits.preferredDuration)
-        #expect(exposure.duration <= limits.maxDuration)
-    }
-
-    @Test func settledRequiresBrightNeutralUnclipped() {
-        #expect(CameraLoop.isSettled(.init(red: 0.92, green: 0.92, blue: 0.92, clippedFraction: 0, sampleCount: 1)))
-        #expect(!CameraLoop.isSettled(.init(red: 0.99, green: 0.99, blue: 0.99, clippedFraction: 0, sampleCount: 1)))
-        #expect(!CameraLoop.isSettled(.init(red: 0.95, green: 0.92, blue: 0.89, clippedFraction: 0, sampleCount: 1)))
-        #expect(!CameraLoop.isSettled(.init(red: 0.92, green: 0.92, blue: 0.92, clippedFraction: 0.5, sampleCount: 1)))
+    @Test func readsASettingSavedBeforeResultsWereRecorded() throws {
+        let suite = "WhiteSettingTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let old = #"{"gains":{"red":1,"green":1,"blue":2},"exposure":{"duration":0.033,"iso":400},"isNeutral":false}"#
+        defaults.set(Data(old.utf8), forKey: "whiteSetting.\(Lens.ultraWide.rawValue)")
+        let setting = try #require(WhiteSetting.load(for: .ultraWide, from: defaults))
+        #expect(setting.result == nil)
     }
 }

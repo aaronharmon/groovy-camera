@@ -1,15 +1,15 @@
 # Groovy Camera — Product Spec
 
-Nov 4, 2026 · @Aaron Harmon
+Nov 4, 2026, updated Nov 7 · @Aaron Harmon
 
 ## 1. Summary
 
-Groovy Camera is a single-user iOS camera app for photographing LPs (used and new) for listings. Its only job is to get good, consistent photos of each record into one place quickly: every shot is square, color-correct against a white background, centered and squared to the frame, named after the album, and uploaded to Cloudflare, without typing or editing.
+Groovy Camera is a single-user iOS camera app for photographing LPs (used and new) for listings. Its only job is to get good, consistent photos of each record into one place quickly: every shot is square, color-correct against a white background, centered and squared to the frame, filed by the date and time it was shot, and uploaded to Cloudflare, without typing or editing.
 
 **Goals**
 
 1. **Listing-ready on capture.** Square, white-balanced, cropped to the sleeve and compressed the moment the shutter fires.
-2. **Zero-touch naming.** The app reads the album name off the record and files the photos under it.
+2. **Zero-touch filing.** Every photo of a record carries the same date and time, so they group together with no typing.
 3. **Consistent look.** Every photo of every record matches.
 4. **Fast.** A sealed record (two photos) in under 15 seconds; a used LP (four photos) in under 30.
 
@@ -36,12 +36,12 @@ Only the sleeve front and back are required, so new or sealed records are two ph
 **Flow**
 
 1. Open the app; a new session is already waiting.
-2. Shoot **sleeve front**. The app reads the album name in the background.
+2. Shoot **sleeve front**.
 3. Shoot **sleeve back**.
 4. **New/sealed record:** tap **Done**. **Used record:** keep going with **Side A** and **Side B**; the viewfinder always shows the next slot ("03 · Side A").
 5. For a double LP, after Side B the app offers **Side C** and **Side D** (then E/F). Skip with one tap.
 6. Tap **Gatefold** if the sleeve opens out (see §6).
-7. Tap **Done** (available once 01 and 02 are shot). The session closes and a new session opens. A short toast shows the record's final name, and tapping it fixes the name. Uploads start in the background when the toast ends.
+7. Tap **Done** (available once 01 and 02 are shot). The session closes, a new session opens, and the record's uploads start in the background.
 
 Any slot can be retaken by tapping its thumbnail. **Extra photos** (inserts, damage, anything else) can be added by hand with a **+ Extra** button; they're numbered 10, 11, 12…
 
@@ -72,38 +72,26 @@ You shoot on a white table under one warm light that doesn't change, so the app 
 
 **How it works**
 
-1. **Set White:** with the table empty, tap **Set White**. In a few seconds the app works out the white balance that makes the table neutral, and the exposure that puts it at roughly 90–95% brightness, never at clipping.
-2. **Locked from then on:** those values are kept, even after closing the app, until you tap **Set White** again. Nothing adjusts live or per photo, so a dark sleeve and a white sleeve are shot exactly the same way and every photo of every record matches.
-3. **Focus** locks on the first shot, because the stand height is fixed.
+1. **Set White:** with the table empty, tap **Set White**. In a couple of seconds the app locks the white balance and exposure the camera picks for the empty table. The screen then shows how the white measured.
+2. **Exposure:** if the table comes out too bright or too dark, **−** and **+** move the locked exposure in half stops, up to 4 stops either way. **Warmth − / +** does the same for color, so a table the camera leaves warm can be taken to white. Both settings are kept, including when you tap **Set White** again.
+3. **Locked from then on:** those values are kept, even after closing the app, until you tap **Set White** again. Nothing adjusts live or per photo, so a dark sleeve and a white sleeve are shot exactly the same way and every photo of every record matches.
+4. **Focus** locks on the first shot, because the stand height is fixed.
 
 **Edge cases**
 
 - If the light changes or the phone moves to a different setup, tap **Set White** again.
-- If the reading doesn't settle (something's on the table, or the light is too warm for the camera to correct fully), the app says so.
+- If the white clips or the light is too dim for the camera, the app says so.
 - Mixed light (window + lamp) can leave uneven color across the frame; one light source gives the best results.
 
-## 5. Automatic album naming (on device)
+## 5. Naming by date and time
 
-The app reads the album name off the record itself. Everything happens on the phone; no external services.
+Each record is named after the local date and time of its first shot, and every photo of it carries that same stamp, so they're easy to group. Nothing reads the record, and there's nothing to type or fix.
 
-**How it reads the name**
+- Folder: `2026-11-07-143205` (date, then hours, minutes and seconds). If that folder is somehow taken already, for example after a clock change, `-2`, `-3` is added.
+- Files: the folder's stamp, the slot number and the shot, e.g. `2026-11-07-143205-01-front.jpg`, `-02-back.jpg`, `-03-side-a.jpg`, `-04-side-b.jpg` … `-09-gatefold.jpg`, `-10-extra.jpg`. The number keeps them in shot order when sorted by name.
+- Full path: `records/2026-11-07-143205/2026-11-07-143205-03-side-a.jpg`.
 
-1. **Sleeve front:** on-device text recognition reads all the text on the cover.
-2. **Sleeve back:** spines and back covers almost always print artist and title, so the back confirms the front or supplies the name when the cover is just artwork.
-3. **Side A label** (when shot): used as a further check.
-4. Apple's on-device language model turns the recognized text into a clean "Artist — Title".
-
-**What the user sees**
-
-- The name appears in a chip at the top of the viewfinder as soon as it's read, usually right after the sleeve front.
-- If it's wrong, tap the chip to edit it. Otherwise, nothing to do.
-- If nothing readable is found by the end of the session, it's saved as `untitled-2026-11-04-1` and can be renamed later from the Library.
-
-**Naming**
-
-- Folder: `artist-title`, lowercase, e.g. `miles-davis-kind-of-blue`. If the same name already exists, `-2`, `-3` is added.
-- Files: `01-sleeve-front.jpg`, `02-sleeve-back.jpg`, `03-side-a.jpg`, `04-side-b.jpg`, `05-side-c.jpg` … `09-gatefold.jpg`, `10-extra.jpg`.
-- Full path: `records/miles-davis-kind-of-blue/03-side-a.jpg`.
+Matching photos to albums happens later, on a laptop, when the listings are made.
 
 ## 6. Gatefold mode
 
@@ -114,7 +102,7 @@ An open gatefold is about twice as wide as it is tall, so it gets its own frame 
 - After capture, edge detection looks for the 2:1 spread. The level works the same as in normal mode.
 - Same white balance and exposure as every other shot. Focus is set once for the spread, then the session's locked focus returns.
 - The tripod height is fixed, so the spread lies sideways under the phone, along its long side, and the output is rotated to match.
-- **Output:** autocropped to the edges of the spread, one 2:1 JPEG, 4096 × 2048, saved as `09-gatefold.jpg`.
+- **Output:** autocropped to the edges of the spread, one 2:1 JPEG, 4096 × 2048, saved as slot 09 (`…-09-gatefold.jpg`).
 
 ## 7. Cloudflare storage
 
@@ -122,16 +110,16 @@ Photos go to a **Cloudflare R2** bucket, one folder per record. A custom domain 
 
 ```
 records/
-  miles-davis-kind-of-blue/
-    01-sleeve-front.jpg
-    02-sleeve-back.jpg
-    03-side-a.jpg
-    04-side-b.jpg
+  2026-11-07-143205/
+    2026-11-07-143205-01-front.jpg
+    2026-11-07-143205-02-back.jpg
+    2026-11-07-143205-03-side-a.jpg
+    2026-11-07-143205-04-side-b.jpg
 ```
 
 **Upload**
 
-- The app talks directly to R2, with no server in between. It holds an R2 API token limited to this one bucket with object read/write only, stored in the iPhone's Keychain (available after first unlock, this device only). It signs its own upload URLs, valid for up to 7 days, and renames a folder by copying each photo and deleting the old one.
+- The app talks directly to R2, with no server in between. It holds an R2 API token limited to this one bucket with object read/write only, stored in the iPhone's Keychain (available after first unlock, this device only). It signs its own upload URLs, valid for up to 7 days.
 - Photos are saved on the phone first, and uploads start in the background after **Done**. They continue when the app is closed or offline, except that iOS cancels them if the app is force-quit, in which case they resume on next launch. Failed uploads retry automatically.
 - Every photo is stored with `Content-Type: image/jpeg` and a one-day `Cache-Control`, so it displays rather than downloads.
 - Local copies are cleared after a confirmed upload (or kept for N days, set in Settings).
@@ -140,12 +128,12 @@ records/
 
 **Camera (home).** Opens straight into the viewfinder.
 
-- Top: album name chip, current slot ("04 · Side B").
+- Top: current slot ("04 · Side B"), how the white measured, and the exposure and warmth − / + controls.
 - Center: square (or 2:1) viewfinder with guides and level.
 - Bottom: shutter, thumbnail strip of this session's slots (tap to retake), **Gatefold**, **+ Extra**, **Done**, **Set White**.
 - **Discard session**, once the session has a photo.
 
-**Library.** Records newest first, with front-cover thumbnail, name and upload status. Tap one to see thumbnails of its photos, rename it or add extras. Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
+**Library.** Records newest first, with front-cover thumbnail, date and time, and upload status. Tap one to see thumbnails of its photos or add extras. Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
 
 **Settings.** R2 account ID, bucket name and token credentials; keep local copies for N days.
 
@@ -157,23 +145,22 @@ records/
 | Camera | AVFoundation; white balance and exposure set once from the empty white table and kept until set again; focus locked on the first shot |
 | Squaring | Vision rectangle detection for sleeves, with each side then moved to where the table really ends; contour detection and circle fit for discs; Core Image rotate and crop only, no perspective warp |
 | Level | Core Motion |
-| Naming | Vision text recognition; Apple's on-device Foundation Models |
 | Local store | SwiftData for sessions and the upload queue |
 | Upload | Background URLSession → R2 (S3-compatible API, signed on the phone) |
 
-**Device requirement:** an iPhone with Apple Intelligence (iPhone 15 Pro or newer), on iOS 26 or newer. Older phones and earlier iOS versions aren't supported.
+**Device requirement:** an iPhone with an ultra-wide camera, on iOS 26 or newer. Older phones and earlier iOS versions aren't supported.
 
 Personal app, not on the App Store: installed from Xcode or TestFlight. A paid Apple Developer account avoids having to reinstall every 7 days.
 
 ## 10. Plan
 
-**Not in v1:** listing creation, pricing, grading, online album lookup, 7″s, CDs, box sets, editing tools, folder links or galleries, full-size viewing in the Library, deleting finished records.
+**Not in v1:** listing creation, pricing, grading, online album lookup, reading album names from the record, 7″s, CDs, box sets, editing tools, folder links or galleries, full-size viewing in the Library, deleting finished records.
 
 **Milestones**
 
 0. **Device spike:** project setup, camera tests on the real stand and light, sample photos.
 1. **Camera core:** session shot list, Discard session, square capture, guides, level, Set White, focus lock, local save.
-2. **Naming:** text recognition on the sleeve front and back, name chip, rename.
+2. **Naming:** date-and-time folder and file names.
 3. **Cloudflare:** R2 bucket, direct background uploads, Library.
 4. **Squaring:** edge detection after capture, straightening and crop.
 5. **Gatefold mode.**

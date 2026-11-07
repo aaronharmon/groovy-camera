@@ -23,8 +23,8 @@ struct PhotoLocation: Hashable, Sendable {
     var photoID: UUID
 }
 
-/// Keeps each photo's files under `Documents/originals/<session>`, named by id so that a change of
-/// record name never moves one. `scripts/pull-originals.sh` copies this folder to a Mac.
+/// Keeps each photo's files under `Documents/originals/<session>`, named by id. Their names
+/// on R2 are worked out at upload time. `scripts/pull-originals.sh` copies this folder to a Mac.
 struct PhotoFiles: Sendable {
     let directory: URL
 

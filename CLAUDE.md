@@ -17,7 +17,7 @@ The repo is public at `aaronharmon/groovy-camera` and MIT licensed (`LICENSE`) s
 - Real record photos: originals, test photos or screenshots showing them. Cover art is copyrighted and originals are large. They stay in a git-ignored folder, and tests must skip cleanly when they're absent.
 - Personal or device details: signing team ID, device IDs, home paths. Team ID and bundle ID prefix go in a git-ignored `Local.xcconfig`, with a committed `Local.example.xcconfig` showing what to set.
 
-Before every commit, read the staged diff with this list in mind. AWS's published example credentials are fine in the signing test vectors, because they're public documentation values.
+Before every commit, read the staged diff with this list in mind. The hooks in `.githooks` (`scripts/check-secrets.sh`) also block these on commit and push; never bypass them with `--no-verify`, and if one fires, fix the content rather than the check. AWS's published example credentials are fine in the signing test vectors, because they're public documentation values.
 
 **Keep it remixable:**
 

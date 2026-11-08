@@ -21,6 +21,19 @@ xcodebuild test -project GroovyCamera.xcodeproj -scheme GroovyCamera \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+## Keeping this repo clean
+
+This repo is public, so a check runs on every commit and push to stop private details getting in. Turn it on once per clone:
+
+```sh
+git config core.hooksPath .githooks
+git config user.email "<id>+<username>@users.noreply.github.com"   # GitHub → Settings → Emails
+```
+
+It blocks the signing values in `Local.xcconfig`, photos, R2 endpoints and keys, home paths, device IDs and commits made with a computer's local email address. To block your own private strings too, such as your R2 account ID, bucket name and photo domain, list them one per line in a file named `Local.secrets` (git-ignored). Public example values that trip the check go in `.secret-scan-allow`. Run it by hand with `scripts/check-secrets.sh staged`.
+
+In GitHub's settings, **Keep my email addresses private** and **Block command line pushes that expose my email** add a second line of defense, and the repo's secret scanning with push protection a third.
+
 ## Cloudflare setup
 
 Photos upload straight from the phone to your own Cloudflare R2 bucket. You need a Cloudflare account with R2 turned on and a domain on Cloudflare. Nothing about your account goes in the code: you type it into the app's Settings, and it's kept only in the phone's Keychain.

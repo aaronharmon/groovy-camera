@@ -1,0 +1,11 @@
+#!/bin/sh
+# Checks every commit about to leave this Mac, including their author emails.
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$remote_sha" = "$zero" ]; then
+    scripts/check-secrets.sh commits "$local_sha" --not --remotes || exit 1
+  else
+    scripts/check-secrets.sh commits "$remote_sha..$local_sha" || exit 1
+  fi
+done

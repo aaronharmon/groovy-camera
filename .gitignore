@@ -12,3 +12,8 @@ DerivedData/
 build/
 xcuserdata/
 .DS_Store
+
+# Private strings the secret check blocks (see scripts/check-secrets.sh)
+Local.secrets
+.env
+.env.*

@@ -2,7 +2,7 @@
 
 An iOS camera app for photographing LPs for listings. Every shot comes out square, color-correct, cropped to the sleeve, filed by date and time and uploaded to Cloudflare R2, with no typing or editing.
 
-**Status: early development.** The app is currently a test screen for checking the camera on a real stand. See `groovy-camera-spec.md` for the product and `plan.md` for the build plan. MIT licensed.
+**Status: early development.** The camera, shot list and local saving work. Uploading to R2 is being built. See `groovy-camera-spec.md` for the product and `plan.md` for the build plan. MIT licensed.
 
 ## Build
 
@@ -20,6 +20,22 @@ Run the tests, which don't need a phone:
 xcodebuild test -project GroovyCamera.xcodeproj -scheme GroovyCamera \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
+
+## Cloudflare setup
+
+Photos upload straight from the phone to your own Cloudflare R2 bucket. You need a Cloudflare account with R2 turned on and a domain on Cloudflare. Nothing about your account goes in the code: you type it into the app's Settings, and it's kept only in the phone's Keychain.
+
+1. **Create a bucket.** In the Cloudflare dashboard, go to **R2 Object Storage** → **Create bucket**. Any name works. The app only writes under `records/` in it.
+2. **Give it a public domain.** Open the bucket → **Settings** → **Custom Domains** → **Connect Domain**, and pick a subdomain of your domain, such as `photos.<your domain>`. Each photo is then at `https://photos.<your domain>/records/<folder>/<file>.jpg`, ready to paste into a listing. Leave the `r2.dev` public URL off.
+3. **Make a token for the app.** Go to **R2 Object Storage** → **Manage API tokens** → **Create API token**. Set **Permissions** to **Object Read & Write**, and under **Specify bucket(s)** choose **Apply to specific buckets only** and pick your bucket. Create it.
+4. **Copy what Cloudflare shows once:** the **Access Key ID** and **Secret Access Key**. The **Account ID** is in the endpoint shown with them (`https://<account ID>.r2.cloudflarestorage.com`) and on the R2 overview page.
+5. **Enter them on the phone.** Open the app, tap the gear, fill in Account ID, Bucket, Access key ID and Secret access key, and tap **Check connection**. The keys are long, so copy each one on your Mac and paste it on the phone: Universal Clipboard carries it across when both are signed into the same Apple Account with Handoff on. It uploads and deletes a small file under `records/` to prove the token works.
+
+Don't paste the secret anywhere else, including chats, issues or commits.
+
+**Revoking or rotating the token.** Under **Manage API tokens**, delete the token to cut the app off at once. To rotate, create a new token as in step 3, enter it in the app's Settings and check the connection, then delete the old token. Uploads signed with the old token fail once it's deleted, and the app signs them again with the new one.
+
+**What the token can do.** Object Read & Write on one bucket includes deleting objects in it. That's the accepted tradeoff for having no server: someone holding the unlocked phone could read, overwrite or delete that bucket's photos, but nothing else in your account.
 
 ## Test photos
 

@@ -10,6 +10,7 @@ final class CameraModel {
     let camera: CameraController
     let level = LevelMonitor()
     let session: SessionController
+    let uploader: Uploader
     private(set) var status = CameraStatus()
     private(set) var isHot = false
     private var thermalObserver: NSObjectProtocol?
@@ -18,6 +19,8 @@ final class CameraModel {
         let files = PhotoFiles()
         camera = CameraController(files: files)
         session = SessionController(context: context, files: files)
+        uploader = Uploader(context: context, files: files)
+        session.onReadyToUpload = { [uploader] in uploader.schedule() }
     }
 
     var canShoot: Bool {

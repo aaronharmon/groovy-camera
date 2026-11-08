@@ -47,6 +47,25 @@ final class Photo {
     var cropKindValue: String?
     var record: Record?
 
+    /// Stored by name, like `State`. A photo uploads once its record is done and it's processed.
+    enum Upload: String {
+        case waiting
+        /// Handed to iOS's background uploader.
+        case uploading
+        /// R2 confirmed it has exactly this file.
+        case uploaded
+        /// Gave up: the token was refused or it failed too often. Saving Settings tries again.
+        case needsAttention
+    }
+
+    var uploadStateValue: String = Upload.waiting.rawValue
+    var uploadAttempts: Int = 0
+    /// The background task now carrying it. A result from any other task is stale.
+    var uploadTaskID: Int?
+    /// When its upload URL was signed, which tells an expired URL from a refused token.
+    var uploadSignedAt: Date?
+    var uploadedAt: Date?
+
     init(slot: Slot) {
         id = UUID()
         slotNumber = slot.number
@@ -60,6 +79,11 @@ final class Photo {
     var state: State {
         get { State(rawValue: stateValue) ?? .failed }
         set { stateValue = newValue.rawValue }
+    }
+
+    var upload: Upload {
+        get { Upload(rawValue: uploadStateValue) ?? .waiting }
+        set { uploadStateValue = newValue.rawValue }
     }
 
     var cropKind: PhotoPipeline.CropKind? {

@@ -6,6 +6,7 @@ import SwiftUI
 struct CameraScreen: View {
     let model: CameraModel
     @State private var isConfirmingDiscard = false
+    @State private var isShowingSettings = false
     /// Briefly true after Set White finishes, so a good result is seen rather than just assumed.
     @State private var isShowingWhiteResult = false
 
@@ -14,6 +15,8 @@ struct CameraScreen: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack {
+                Button { isShowingSettings = true } label: { Image(systemName: "gearshape") }
+                    .accessibilityLabel("Settings")
                 Text(session.state.currentSlot?.title ?? "All sides shot")
                     .font(.headline.monospacedDigit())
                 Spacer()
@@ -70,6 +73,7 @@ struct CameraScreen: View {
         .onCameraCaptureEvent { event in
             if event.phase == .ended { model.shoot() }
         }
+        .sheet(isPresented: $isShowingSettings) { SettingsScreen(uploader: model.uploader) }
         .confirmationDialog("Discard this record's photos?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
             Button("Discard session", role: .destructive) { session.discard() }
         } message: {

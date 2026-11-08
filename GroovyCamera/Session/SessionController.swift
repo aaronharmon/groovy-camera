@@ -42,6 +42,10 @@ final class SessionController {
     /// Set when a shot couldn't be saved, because the slot then needs shooting again.
     private(set) var captureFailed = false
 
+    /// Called when a record is finished or a photo is processed, since either can make photos
+    /// ready to upload.
+    var onReadyToUpload: (() -> Void)?
+
     var canDiscard: Bool { !state.shot.isEmpty }
     var currentRecord: Record? { record }
 
@@ -120,6 +124,7 @@ final class SessionController {
         record.isOpen = false
         save()
         startNewSession()
+        onReadyToUpload?()
     }
 
     func discard() {
@@ -177,6 +182,7 @@ final class SessionController {
         }
         refresh()
         processNext()
+        onReadyToUpload?()
     }
 
     private func oldestPendingPhoto() -> Photo? {

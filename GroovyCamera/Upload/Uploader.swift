@@ -94,6 +94,13 @@ final class Uploader {
         schedule()
     }
 
+    /// Empties the spreadsheet: from now on it lists only records started after this.
+    func clearSpreadsheet() {
+        PhotoIndexStart.save(Date())
+        indexVersion += 1
+        schedule()
+    }
+
     /// Clears the phone's copies of photos R2 has confirmed, once they've been kept long enough.
     func clearUploaded() {
         let keepDays = LocalCopies.keepDays
@@ -150,8 +157,10 @@ final class Uploader {
     private func uploadIndex(with client: R2Client) {
         let domain = PhotoDomain.load()
         guard !domain.isEmpty, let request = client.request(method: "PUT", key: PhotoIndex.key, headers: PhotoIndex.headers) else { return }
-        let entries = photos(in: .uploaded).compactMap { photo in
-            photo.record.map { PhotoIndex.Entry(folder: $0.folder, slot: photo.slot) }
+        let clearedAt = PhotoIndexStart.load()
+        let entries = photos(in: .uploaded).compactMap { photo -> PhotoIndex.Entry? in
+            guard let record = photo.record, PhotoIndexStart.lists(recordCreatedAt: record.createdAt, clearedAt: clearedAt) else { return nil }
+            return PhotoIndex.Entry(folder: record.folder, slot: photo.slot)
         }
         let version = indexVersion
         // Versioned, so a newer spreadsheet never overwrites a file iOS is still sending.

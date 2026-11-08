@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import GroovyCamera
 
@@ -19,6 +20,13 @@ struct PhotoIndexTests {
             "2026-11-08-102210,front,\(base)/2026-11-08-102210/2026-11-08-102210-01-front.jpg",
             "",
         ].joined(separator: "\r\n"))
+    }
+
+    @Test func listsOnlyRecordsStartedSinceItWasCleared() {
+        let cleared = Date(timeIntervalSince1970: 1_000_000)
+        #expect(PhotoIndexStart.lists(recordCreatedAt: cleared.addingTimeInterval(-1), clearedAt: nil))
+        #expect(!PhotoIndexStart.lists(recordCreatedAt: cleared.addingTimeInterval(-1), clearedAt: cleared))
+        #expect(PhotoIndexStart.lists(recordCreatedAt: cleared.addingTimeInterval(1), clearedAt: cleared))
     }
 
     @Test func acceptsTheDomainHoweverItsTyped() {

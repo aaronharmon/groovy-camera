@@ -52,7 +52,7 @@ struct PhotoPipelineTests {
     }
 
     @Test(arguments: [0, 4, -8, 15, 25, -35] as [CGFloat])
-    func straightensATiltedSleeveToFillTheOutput(degrees: CGFloat) throws {
+    func straightensATiltedSleeveWithAThinBorder(degrees: CGFloat) throws {
         let image = try frame(rotationDegrees: degrees) { context, side in
             context.setFillColor(CGColor(red: 0.1, green: 0.1, blue: 0.15, alpha: 1))
             context.fill(CGRect(x: -side / 2, y: -side / 2, width: side, height: side))
@@ -62,9 +62,13 @@ struct PhotoPipelineTests {
 
         let result = try decoded(output.jpeg)
         #expect(result.width == 2048 && result.height == 2048)
-        // No white table left in any corner.
-        for (x, y) in [(0.01, 0.01), (0.99, 0.01), (0.01, 0.99), (0.99, 0.99)] as [(CGFloat, CGFloat)] {
-            #expect(try brightness(result, x: x, y: y) < 80, "corner \(x),\(y)")
+        // The border is about 2.8% of the output on each side: table at the very edge, sleeve just
+        // inside it, all the way round.
+        for (x, y) in [(0.01, 0.01), (0.99, 0.01), (0.01, 0.99), (0.99, 0.99), (0.5, 0.01), (0.01, 0.5)] as [(CGFloat, CGFloat)] {
+            #expect(try brightness(result, x: x, y: y) > 200, "border at \(x),\(y)")
+        }
+        for (x, y) in [(0.05, 0.05), (0.95, 0.05), (0.05, 0.95), (0.95, 0.95)] as [(CGFloat, CGFloat)] {
+            #expect(try brightness(result, x: x, y: y) < 80, "sleeve corner \(x),\(y)")
         }
     }
 

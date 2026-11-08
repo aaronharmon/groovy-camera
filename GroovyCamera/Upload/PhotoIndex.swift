@@ -4,7 +4,8 @@ import Foundation
 ///
 /// One row per photo, with the record's folder only on its first row, so each record reads as a
 /// block. Records run oldest first, so new ones land at the bottom. It's rebuilt from this phone's
-/// records, so photos uploaded by an earlier install of the app aren't listed.
+/// records, so photos uploaded by an earlier install of the app aren't listed, and nor are records
+/// started before the spreadsheet was last cleared.
 enum PhotoIndex {
     static let key = "\(R2Client.prefix)photos.csv"
     /// Short, so the spreadsheet's link shows new rows within a minute.
@@ -52,6 +53,24 @@ enum PhotoIndex {
     private static func escape(_ field: String) -> String {
         guard field.contains(where: { ",\"\r\n".contains($0) }) else { return field }
         return "\"\(field.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+}
+
+/// When the spreadsheet was last cleared. Only records started after it are listed, so the
+/// spreadsheet can be emptied of records already dealt with. Their photos stay in R2.
+enum PhotoIndexStart {
+    private static let key = "photoIndexClearedAt"
+
+    static func load(from defaults: UserDefaults = .standard) -> Date? {
+        defaults.object(forKey: key) as? Date
+    }
+
+    static func save(_ date: Date, to defaults: UserDefaults = .standard) {
+        defaults.set(date, forKey: key)
+    }
+
+    static func lists(recordCreatedAt createdAt: Date, clearedAt: Date?) -> Bool {
+        clearedAt.map { createdAt >= $0 } ?? true
     }
 }
 

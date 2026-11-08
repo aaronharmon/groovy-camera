@@ -9,6 +9,7 @@ struct SettingsScreen: View {
     @State private var domain = PhotoDomain.load()
     @State private var keepDays = LocalCopies.keepDays
     @State private var keepOriginals = LocalCopies.keepOriginals
+    @State private var isConfirmingClear = false
 
     private enum Check: Equatable {
         case idle, checking, passed
@@ -52,11 +53,17 @@ struct SettingsScreen: View {
                     if let url = PhotoIndex.url(domain: domain) {
                         Link("Open spreadsheet", destination: url)
                         Button("Copy spreadsheet link") { UIPasteboard.general.url = url }
+                        Button("Clear spreadsheet", role: .destructive) { isConfirmingClear = true }
                     }
                 } header: {
                     Text("Photo domain")
                 } footer: {
-                    Text("The bucket's custom domain. The app keeps a spreadsheet of every uploaded photo's link at records/photos.csv, updated after each upload.")
+                    Text("The bucket's custom domain. The app keeps a spreadsheet of every uploaded photo's link at records/photos.csv, updated after each upload. Clearing it lists only records shot afterwards; their photos stay in R2.")
+                }
+                .confirmationDialog("Clear the spreadsheet?", isPresented: $isConfirmingClear, titleVisibility: .visible) {
+                    Button("Clear spreadsheet", role: .destructive) { uploader.clearSpreadsheet() }
+                } message: {
+                    Text("It will list only records shot from now on. Photos already in R2 aren't deleted.")
                 }
 
                 Section {

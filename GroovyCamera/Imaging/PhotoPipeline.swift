@@ -19,8 +19,9 @@ enum PhotoPipeline {
         var cropKind: CropKind
     }
 
-    /// Trims a sliver inside the detected edge, so no background shows along it.
-    private static let edgeInset: CGFloat = 0.005
+    /// A thin border of table left around a sleeve, as a share of its side, so buyers can see the
+    /// edges and corners for wear. It also hides small errors in where the edge was found.
+    static let sleeveMargin: CGFloat = 0.03
     /// How far either side of Vision's edge to look for the real one, as a share of the sleeve.
     /// Vision's corners have been measured up to 4% off on real sleeves.
     private static let edgeSearchShare: CGFloat = 0.06
@@ -110,11 +111,23 @@ enum PhotoPipeline {
         let rotated = image.transformed(by: upright)
         let snapped = snappedToEdges(rotated, center: square.center, side: square.side)
         let center = snapped.center
-        let side = snapped.side * (1 - edgeInset * 2)
-        return (
-            rotated,
-            CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
-        )
+        let withMargin = squareAround(center, side: snapped.side * (1 + sleeveMargin * 2))
+        // Past the photo's edge there's nothing to show, so a sleeve right at the edge gets no border.
+        let crop = isInside(withMargin, of: extent, after: upright) ? withMargin : squareAround(center, side: snapped.side)
+        return (rotated, crop)
+    }
+
+    private static func squareAround(_ center: CGPoint, side: CGFloat) -> CGRect {
+        CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
+    }
+
+    /// Whether every corner of a crop in the rotated image lands inside the original photo.
+    private static func isInside(_ crop: CGRect, of extent: CGRect, after transform: CGAffineTransform) -> Bool {
+        let back = transform.inverted()
+        return [
+            CGPoint(x: crop.minX, y: crop.minY), CGPoint(x: crop.maxX, y: crop.minY),
+            CGPoint(x: crop.minX, y: crop.maxY), CGPoint(x: crop.maxX, y: crop.maxY),
+        ].allSatisfy { extent.insetBy(dx: -0.5, dy: -0.5).contains($0.applying(back)) }
     }
 
     /// Vision finds the right rectangle but places it loosely, which leaves a strip of table or

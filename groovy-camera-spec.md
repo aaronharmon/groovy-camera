@@ -53,7 +53,7 @@ Any slot can be retaken by tapping its thumbnail. **Extra photos** (inserts, dam
 
 **Guidelines**
 
-- **Sleeve target:** a square outline showing where the sleeve edges should sit, with some white background visible around it (the app needs that background to find the edges; it's cropped off afterwards).
+- **Sleeve target:** a square outline showing where the sleeve edges should sit, with some white background visible around it (the app needs that background to find the edges; all but a thin border of it is cropped off afterwards).
 - **Disc circle** and **center dot** for disc shots, so the spindle hole lands dead center.
 - **Center crosshair** on every shot.
 
@@ -61,7 +61,7 @@ Any slot can be retaken by tapping its thumbnail. **Extra photos** (inserts, dam
 
 - **Line-up guides only:** there's no live outline or auto-capture. You line the record up with the guides and press the shutter.
 - **Level:** a bubble level shows when the phone is flat, which prevents keystoning. Green within ±1.5°.
-- **Autocrop to the sleeve edge:** after capture, the app rotates the sleeve upright and crops to its edges, so the sleeve fills the whole square with no background. It only ever rotates, crops and scales evenly; it never warps a record's shape to correct perspective. If the edges can't be found, it falls back to a center crop of the guide area.
+- **Autocrop to the sleeve edge:** after capture, the app rotates the sleeve upright and crops to its edges with a thin border of table (3% of the sleeve's side) all round, so buyers can see the edges and corners. It only ever rotates, crops and scales evenly; it never warps a record's shape to correct perspective. If the edges can't be found, it falls back to a center crop of the guide area.
 - **Disc shots:** cropped to a square just around the disc's edge, disc centered.
 
 Flash is off (glare on vinyl and shrink wrap). Volume buttons work as the shutter.
@@ -133,7 +133,7 @@ records/
 - Bottom: shutter, thumbnail strip of this session's slots (tap to retake), **Gatefold**, **+ Extra**, **Done**, **Set White**.
 - **Discard session**, once the session has a photo.
 
-**Spreadsheet (no Library screen).** The app keeps `records/photos.csv` in the bucket, listing every uploaded photo's link: one row per photo (Record, Photo, URL), with the record's date and time only on its first row, oldest first. Settings has its link. Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
+**Spreadsheet (no Library screen).** The app keeps `records/photos.csv` in the bucket, listing every uploaded photo's link: one row per photo (Record, Photo, URL), with the record's date and time only on its first row, oldest first. Settings has its link and a **Clear spreadsheet** button, after which only records shot from then on are listed (their photos stay in R2). Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
 
 **Settings.** R2 account ID, bucket name and token credentials; photo domain, for the spreadsheet's links; upload counts; keep local copies for N days; keep originals (for testing).
 

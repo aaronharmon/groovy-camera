@@ -28,7 +28,7 @@ Before every commit, read the staged diff with this list in mind. AWS's publishe
 ## How we work
 
 - **Work one milestone at a time, in the order in `plan.md`.** A milestone finishes when its "done when" criteria are met, not when the code compiles.
-- **Stay in scope.** Don't add features, settings or abstractions that aren't in the spec or plan. This project deliberately trims scope: no server, no third-party Swift dependencies, no Library image loading. Suggest additions rather than building them.
+- **Stay in scope.** Don't add features, settings or abstractions that aren't in the spec or plan. This project deliberately trims scope: no server, no third-party Swift dependencies, no Library screen. Suggest additions rather than building them.
 - **Ask before changing a decision recorded in `plan.md` §2.** Those were made on purpose.
 - **Be honest about what was verified.** Say separately what passed in tests and what still needs checking on the phone. Code that builds and passes tests isn't confirmed to work on a real record.
 - **Git:** commit or push only when asked. Use a branch for milestone work, not `main`.

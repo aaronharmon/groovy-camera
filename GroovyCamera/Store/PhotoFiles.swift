@@ -64,7 +64,18 @@ struct PhotoFiles: Sendable {
 
     /// Removes one photo's files, and its session folder if that was the last of them.
     func remove(_ location: PhotoLocation) {
-        for url in [originalURL(location), finishedURL(location), thumbnailURL(location), sidecarURL(location)] {
+        remove([originalURL(location), finishedURL(location), thumbnailURL(location), sidecarURL(location)], in: location)
+    }
+
+    /// Clears a photo R2 has confirmed. The original and its sidecar can stay for re-running the
+    /// image pipeline.
+    func removeUploaded(_ location: PhotoLocation, keepingOriginal: Bool) {
+        let copies = [finishedURL(location), thumbnailURL(location)]
+        remove(keepingOriginal ? copies : copies + [originalURL(location), sidecarURL(location)], in: location)
+    }
+
+    private func remove(_ urls: [URL], in location: PhotoLocation) {
+        for url in urls {
             try? FileManager.default.removeItem(at: url)
         }
         let session = sessionDirectory(location.sessionID)

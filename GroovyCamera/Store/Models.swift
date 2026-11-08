@@ -65,6 +65,8 @@ final class Photo {
     /// When its upload URL was signed, which tells an expired URL from a refused token.
     var uploadSignedAt: Date?
     var uploadedAt: Date?
+    /// Its copies on the phone were cleared after upload. See `LocalCopies`.
+    var isCleared: Bool = false
 
     init(slot: Slot) {
         id = UUID()

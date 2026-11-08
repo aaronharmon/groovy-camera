@@ -12,6 +12,8 @@ import SwiftData
 @Observable
 final class Uploader {
     static let sessionIdentifier = "groovycamera.uploads"
+    /// Marks the spreadsheet's upload task, followed by the version it carries.
+    private static let indexTaskPrefix = "index:"
 
     struct Summary: Equatable {
         var waiting = 0
@@ -27,6 +29,17 @@ final class Uploader {
     @ObservationIgnored private let session: URLSession
     @ObservationIgnored private var isScheduling = false
     @ObservationIgnored private var needsAnotherPass = false
+    /// Bumped whenever the spreadsheet's contents change. Stored, so a change made just before the
+    /// app closes still gets uploaded.
+    @ObservationIgnored private var indexVersion: Int {
+        get { UserDefaults.standard.integer(forKey: "photoIndexVersion") }
+        set { UserDefaults.standard.set(newValue, forKey: "photoIndexVersion") }
+    }
+    @ObservationIgnored private var indexUploadedVersion: Int {
+        get { UserDefaults.standard.integer(forKey: "photoIndexUploadedVersion") }
+        set { UserDefaults.standard.set(newValue, forKey: "photoIndexUploadedVersion") }
+    }
+    @ObservationIgnored private let indexDirectory = URL.applicationSupportDirectory.appending(path: "photo-index", directoryHint: .isDirectory)
 
     init(context: ModelContext, files: PhotoFiles) {
         self.context = context
@@ -75,8 +88,31 @@ final class Uploader {
         schedule()
     }
 
+    /// The photo domain changed, so every link in the spreadsheet did too.
+    func photoDomainChanged() {
+        indexVersion += 1
+        schedule()
+    }
+
+    /// Clears the phone's copies of photos R2 has confirmed, once they've been kept long enough.
+    func clearUploaded() {
+        let keepDays = LocalCopies.keepDays
+        let keepOriginals = LocalCopies.keepOriginals
+        let now = Date()
+        for photo in photos(in: .uploaded) where !photo.isCleared {
+            guard let record = photo.record, let uploadedAt = photo.uploadedAt,
+                  LocalCopies.isDue(uploadedAt: uploadedAt, keepDays: keepDays, now: now) else { continue }
+            files.removeUploaded(PhotoLocation(sessionID: record.sessionID, photoID: photo.id), keepingOriginal: keepOriginals)
+            photo.isCleared = true
+        }
+        save()
+    }
+
     private func scheduleReady() async {
-        let liveTasks = Set(await session.allTasks.map(\.taskIdentifier))
+        clearUploaded()
+        let tasks = await session.allTasks
+        let liveTasks = Set(tasks.map(\.taskIdentifier))
+        let isIndexUploading = tasks.contains { $0.taskDescription?.hasPrefix(Self.indexTaskPrefix) == true }
         guard let credentials = CredentialStore.load(), credentials.isComplete else {
             refreshSummary()
             return
@@ -104,9 +140,48 @@ final class Uploader {
         }
         save()
         refreshSummary()
+
+        // The spreadsheet goes up once the photos have, so its links all work when it changes.
+        if summary.waiting == 0, indexUploadedVersion != indexVersion, !isIndexUploading {
+            uploadIndex(with: client)
+        }
+    }
+
+    private func uploadIndex(with client: R2Client) {
+        let domain = PhotoDomain.load()
+        guard !domain.isEmpty, let request = client.request(method: "PUT", key: PhotoIndex.key, headers: PhotoIndex.headers) else { return }
+        let entries = photos(in: .uploaded).compactMap { photo in
+            photo.record.map { PhotoIndex.Entry(folder: $0.folder, slot: photo.slot) }
+        }
+        let version = indexVersion
+        // Versioned, so a newer spreadsheet never overwrites a file iOS is still sending.
+        let file = indexDirectory.appending(path: "photos-\(version).csv")
+        do {
+            try FileManager.default.createDirectory(at: indexDirectory, withIntermediateDirectories: true)
+            try Data(PhotoIndex.csv(entries, domain: domain).utf8).write(to: file, options: .atomic)
+        } catch {
+            return
+        }
+        let task = session.uploadTask(with: request, fromFile: file)
+        task.taskDescription = "\(Self.indexTaskPrefix)\(version)"
+        task.resume()
+    }
+
+    private func indexFinished(version: Int, result: UploadEvents.Result) {
+        try? FileManager.default.removeItem(at: indexDirectory.appending(path: "photos-\(version).csv"))
+        // A failure waits for the next pass, which comes with the next upload, Settings change or
+        // the app coming to the front.
+        if let status = result.status, (200..<300).contains(status) {
+            indexUploadedVersion = max(indexUploadedVersion, version)
+        }
+        if indexUploadedVersion != indexVersion, !result.isCancelled { schedule() }
     }
 
     private func finished(_ result: UploadEvents.Result) {
+        if let description = result.photoID, description.hasPrefix(Self.indexTaskPrefix) {
+            if let version = Int(description.dropFirst(Self.indexTaskPrefix.count)) { indexFinished(version: version, result: result) }
+            return
+        }
         guard let id = result.photoID.flatMap(UUID.init(uuidString:)), let photo = photo(id: id),
               photo.uploadTaskID == result.taskID, photo.upload == .uploading else { return }
 
@@ -132,6 +207,7 @@ final class Uploader {
         case .uploaded:
             photo.upload = .uploaded
             photo.uploadedAt = Date()
+            indexVersion += 1
         case .retry:
             photo.upload = .waiting
         case .needsAttention:
@@ -139,6 +215,7 @@ final class Uploader {
         }
         save()
         refreshSummary()
+        if next == .uploaded { clearUploaded() }
         if next == .retry { schedule() }
     }
 
@@ -174,6 +251,7 @@ final class Uploader {
 final class UploadEvents: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     struct Result {
         var taskID: Int
+        /// The photo's id, or the spreadsheet's marker.
         var photoID: String?
         var status: Int?
         var etag: String?

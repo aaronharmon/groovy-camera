@@ -6,6 +6,9 @@ struct SettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var credentials = CredentialStore.load() ?? R2Credentials()
     @State private var check: Check = .idle
+    @State private var domain = PhotoDomain.load()
+    @State private var keepDays = LocalCopies.keepDays
+    @State private var keepOriginals = LocalCopies.keepOriginals
 
     private enum Check: Equatable {
         case idle, checking, passed
@@ -41,6 +44,39 @@ struct SettingsScreen: View {
                     Text("Uploads and deletes a small file under records/.")
                 }
 
+                Section {
+                    TextField("https://photos.example.com", text: $domain)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if let url = PhotoIndex.url(domain: domain) {
+                        Link("Open spreadsheet", destination: url)
+                        Button("Copy spreadsheet link") { UIPasteboard.general.url = url }
+                    }
+                } header: {
+                    Text("Photo domain")
+                } footer: {
+                    Text("The bucket's custom domain. The app keeps a spreadsheet of every uploaded photo's link at records/photos.csv, updated after each upload.")
+                }
+
+                Section {
+                    Stepper(value: $keepDays, in: LocalCopies.dayRange) {
+                        LabeledContent("Keep uploaded photos", value: keepDays == 0 ? "No" : "\(keepDays) days")
+                    }
+                    Toggle("Keep originals", isOn: $keepOriginals)
+                } header: {
+                    Text("On this phone")
+                } footer: {
+                    Text("Photos are cleared from the phone once R2 confirms it has them, or after the days set here. Originals are the full-size shots, kept for testing the photo processing.")
+                }
+                .onChange(of: keepDays) { _, days in
+                    LocalCopies.keepDays = days
+                    uploader.clearUploaded()
+                }
+                .onChange(of: keepOriginals) { _, keep in
+                    LocalCopies.keepOriginals = keep
+                }
+
                 Section("Uploads") {
                     LabeledContent("Waiting", value: "\(uploader.summary.waiting)")
                     LabeledContent("Uploaded", value: "\(uploader.summary.uploaded)")
@@ -71,6 +107,10 @@ struct SettingsScreen: View {
     }
 
     private func save() {
+        if domain.trimmingCharacters(in: .whitespaces) != PhotoDomain.load() {
+            PhotoDomain.save(domain)
+            uploader.photoDomainChanged()
+        }
         guard credentials != CredentialStore.load() ?? R2Credentials() else { return }
         CredentialStore.save(credentials)
         uploader.retryAfterSettingsChange()

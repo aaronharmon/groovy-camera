@@ -133,9 +133,9 @@ records/
 - Bottom: shutter, thumbnail strip of this session's slots (tap to retake), **Gatefold**, **+ Extra**, **Done**, **Set White**.
 - **Discard session**, once the session has a photo.
 
-**Library.** Records newest first, with front-cover thumbnail, date and time, and upload status. Tap one to see thumbnails of its photos or add extras. Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
+**Spreadsheet (no Library screen).** The app keeps `records/photos.csv` in the bucket, listing every uploaded photo's link: one row per photo (Record, Photo, URL), with the record's date and time only on its first row, oldest first. Settings has its link. Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
 
-**Settings.** R2 account ID, bucket name and token credentials; keep local copies for N days.
+**Settings.** R2 account ID, bucket name and token credentials; photo domain, for the spreadsheet's links; upload counts; keep local copies for N days; keep originals (for testing).
 
 ## 9. Technical notes
 
@@ -154,13 +154,13 @@ Personal app, not on the App Store: installed from Xcode or TestFlight. A paid A
 
 ## 10. Plan
 
-**Not in v1:** listing creation, pricing, grading, online album lookup, reading album names from the record, 7″s, CDs, box sets, editing tools, folder links or galleries, full-size viewing in the Library, deleting finished records.
+**Not in v1:** listing creation, pricing, grading, online album lookup, reading album names from the record, 7″s, CDs, box sets, editing tools, folder links or galleries, a Library screen, adding extras after Done, deleting finished records.
 
 **Milestones**
 
 0. **Device spike:** project setup, camera tests on the real stand and light, sample photos.
 1. **Camera core:** session shot list, Discard session, square capture, guides, level, Set White, focus lock, local save.
 2. **Naming:** date-and-time folder and file names.
-3. **Cloudflare:** R2 bucket, direct background uploads, Library.
+3. **Cloudflare:** R2 bucket, direct background uploads, photo spreadsheet.
 4. **Squaring:** edge detection after capture, straightening and crop.
 5. **Gatefold mode.**

@@ -17,8 +17,8 @@ These are places where the spec conflicts with itself or with how the platform w
 ### Decided
 
 - **No Worker: the app uploads directly to R2.** The app holds an R2 API token limited to this one bucket, with object read/write only and no admin rights. You enter it in Settings, and it's stored in the Keychain as available after first unlock, this device only, so it never syncs or transfers to another phone. It signs its own upload URLs on the phone and hands them to iOS as background uploads, which go out when a connection returns. *This replaces the Worker and token in spec §7, §8 and §9.* The accepted tradeoff is a key on the phone. Object read/write includes delete, so a compromised phone could read, overwrite or delete anything in that bucket, but nothing else. The README checklist covers revoking and rotating it.
-- **No folder link and no gallery.** The goal is simple: photos land in R2, and you pull them down to your laptop or build a CSV there. *This removes "copy its folder link" from spec §8.* The Library is only for checking and fixing records on the phone, and it shows **thumbnails only**.
-- **Laptop access isn't part of this build.** Downloads and CSVs use existing tools (the R2 dashboard, `rclone`, or `wrangler`). Photo URLs follow a fixed pattern, `https://<domain>/records/<folder>/<file>`, so a CSV can be built from a file listing.
+- **No folder link, no gallery and no Library screen.** The goal is simple: photos land in R2, and a spreadsheet lists their links. *This removes "copy its folder link" and the Library from spec §8.* The Library was dropped on Nov 8 by the owner's decision, so extras can only be added while a record is being shot.
+- **The app keeps a spreadsheet of photo links in R2.** After uploads finish, it rewrites `records/photos.csv`: one row per uploaded photo (Record, Photo, URL), with the record's folder only on its first row, oldest records first. Links use the photo domain entered in Settings, `https://<domain>/records/<folder>/<file>`. It's rebuilt from the phone's own records, so photos uploaded by an earlier install aren't listed. *Added Nov 8 at the owner's request, replacing "build a CSV on the laptop".* Downloads still use existing tools (the R2 dashboard, `rclone`, or `wrangler`).
 - **The phone sits on a tripod at a fixed height of roughly 30 cm.** It can't be raised, so the main lens can't fit a sleeve plus margin. We're **trying the ultra-wide** with Apple's distortion correction on, replacing the earlier main-camera decision. You line records up with guides and press the shutter, with a level for setup. **No auto-capture and no live outline.**
 - **12 MP capture, 2048 × 2048 output for every square photo,** the size eBay and Shopify want. The owner tried 48 MP, which reads small print more crisply, and decided against it, so the app caps capture at 12 MP. Gatefold stays 4096 × 2048 for now.
 - **White is set once.** You tap **Set White** on the empty table, and the app locks white balance and exposure as the camera's own auto modes pick them there, and keeps them across launches until you set them again. Nothing adjusts live or per photo. *This replaces the live sampling, lock on first shot and per-photo correction in the original spec §4.* The first device test showed why: the sleeve fills so much of the frame that the "white margin" was often the record itself, so dark sleeves blew out and cream sleeves turned the background blue.
@@ -38,7 +38,7 @@ These are places where the spec conflicts with itself or with how the platform w
 | D6 | A phone lying flat reports no useful orientation, so photos could be saved rotated. | The app is portrait-locked and ignores device orientation. "Up" on the record is the top of the phone. A square sleeve is straightened by the smallest rotation, so it won't flip 90°. |
 | D7 | Force-quitting an app makes iOS cancel its background uploads, which the spec's "app closed" wording doesn't allow for. | Uploads survive the app being suspended or closed by the system, and offline periods. After a force-quit they resume on next launch. |
 | D8 | The app is killed mid-session. | Reopening resumes that session if it has any photos. |
-| D9 | The Library needs images after local copies are cleared. | Keep a small thumbnail of every photo on the phone permanently, and show only those in the Library. The app never loads images from the domain or needs to know it. |
+| D9 | The Library needs images after local copies are cleared. | *Dropped Nov 8 with the Library.* |
 | D11 | The default for "keep local copies for N days" isn't given. | 0 days: clear once the upload is confirmed. |
 | D12 | Slug rules for special characters. | *Dropped Nov 7: date-and-time names have none.* |
 | D13 | Reinstalling the app wipes local records, so a new record could reuse a folder. | *Dropped Nov 7: a new record's time is always later than an old one's. A repeated stamp, after a clock change, gets `-2` against the records on the phone.* |
@@ -59,7 +59,7 @@ GroovyCamera/
                             DiscDetector, SpreadDetector, Exporter
   Naming/                   RecordFolder (date-and-time folder and file names)
   Upload/                   UploadQueue, BackgroundSession, R2Client, R2Signer, Keychain
-  Library/  Settings/       Screens
+  Settings/                 Settings screen
   Store/                    SwiftData models
 GroovyCameraTests/          Unit and fixture tests, Fixtures/ with real photos
 ```
@@ -85,7 +85,7 @@ The shutter must never wait on processing, or the 15-second and 30-second target
 - Only one full-size image is ever decoded at a time, and its memory is released before the next begins.
 - If the phone gets hot (thermal state serious or above), the app says so and the queue keeps running.
 
-**Keep originals:** a debug setting, on by default during M0–M1 and off by default after that. It lets the pipeline be re-run on real originals as the detection and color logic change. Discard session removes originals too.
+**Keep originals:** a switch in Settings, on by default until M4's edge detection is done, because it's measured on originals. It lets the pipeline be re-run on real originals as the detection and color logic change. Discard session removes originals too.
 
 ### White balance, exposure and focus
 
@@ -110,7 +110,7 @@ R2 offers an S3-compatible API, so the app needs only a small client and request
 | Signed `PUT` | Background upload of a photo. The returned ETag is compared with the local MD5 before the photo is marked uploaded |
 
 - **Headers:** every `PUT` signs in `Content-Type: image/jpeg` and `Cache-Control: public, max-age=86400`, so photos display rather than download. One day rather than "forever", so a photo replaced by hand in R2 shows the new version within a day.
-- **Signed URL lifetime:** the maximum of 7 days, so a photo can wait out a long offline stretch. If a URL expires or the token was rotated, R2 rejects the upload, iOS wakes the app, and it signs a new URL and queues the photo again. If a freshly signed URL is also rejected, the photo is marked as needing attention in the Library, rather than retrying forever.
+- **Signed URL lifetime:** the maximum of 7 days, so a photo can wait out a long offline stretch. If a URL expires or the token was rotated, R2 rejects the upload, iOS wakes the app, and it signs a new URL and queues the photo again. If a freshly signed URL is also rejected, the photo is marked as needing attention, counted in Settings, rather than retrying forever. Saving Settings tries those photos again.
 - **Paths:** every request is built from the record's date-and-time folder and a known filename, so the app only ever writes under `records/`.
 - **Locked phone:** photo files use a protection class that still allows access while the phone is locked after first unlock, and the Keychain token uses the matching setting. Otherwise uploads and re-signing would fail on a locked phone.
 - **Settings:** R2 account ID, bucket name, access key ID and secret access key, alongside the spec's local copy setting and the debug Keep originals setting. These replace the Worker URL and token. None of them are built into the app or committed to the repo.
@@ -150,9 +150,10 @@ Each milestone ends with something you can try on the phone. Simulator builds an
 
 - You create the R2 bucket, custom domain and bucket-only token, following a short checklist in the README, which also covers revoking and rotating the token.
 - R2 signing and client, upload queue, background session, automatic retries and re-signing, ETag confirmation, local cleanup.
-- Library screen (newest first, thumbnails, date and time, status, detail, add extras) and Settings.
+- Clearing local copies after a confirmed upload: the finished JPEG and thumbnail, and the original unless Keep originals is on. Settings sets how many days to keep them (0–30, default 0). The record rows stay, for the spreadsheet.
+- Settings (R2 details, photo domain, keep days, Keep originals, upload counts) and the photo spreadsheet, `records/photos.csv`. The Library screen was dropped (§2).
 - **Tests:** signing against AWS's published test vectors; path checks; queue state changes, including an expired URL and a rejected token.
-- **Done when (on device):** photos taken in airplane mode, with the app then closed, reach R2 after reconnecting without reopening the app, under their date-and-time names, and the public photo URLs display in a browser rather than download.
+- **Done when (on device):** photos taken in airplane mode, with the app then closed, reach R2 after reconnecting without reopening the app, under their date-and-time names, and appear in the spreadsheet. (The browser display check was dropped by the owner on Nov 8; the Content-Type header is still signed in.)
 
 ### M4: Squaring polish
 

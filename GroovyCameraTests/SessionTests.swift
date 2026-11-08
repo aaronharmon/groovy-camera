@@ -105,7 +105,7 @@ struct SessionControllerTests {
         keepOriginals: Bool = true,
         processor: @escaping SessionController.Processor = Self.fakeProcessor
     ) -> SessionController {
-        SessionController(context: container.mainContext, files: files, keepOriginals: keepOriginals, processor: processor)
+        SessionController(context: container.mainContext, files: files, keepOriginals: { keepOriginals }, processor: processor)
     }
 
     private static let fakeProcessor: SessionController.Processor = { job in

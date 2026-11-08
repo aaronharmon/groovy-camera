@@ -54,12 +54,12 @@ final class SessionController {
 
     private let context: ModelContext
     private let files: PhotoFiles
-    private let keepOriginals: Bool
+    private let keepOriginals: () -> Bool
     private let processor: Processor
     private var record: Record?
     private var activeJob: Task<Void, Never>?
 
-    init(context: ModelContext, files: PhotoFiles, keepOriginals: Bool = true, processor: @escaping Processor = PhotoProcessor.process) {
+    init(context: ModelContext, files: PhotoFiles, keepOriginals: @escaping () -> Bool = { LocalCopies.keepOriginals }, processor: @escaping Processor = PhotoProcessor.process) {
         self.context = context
         self.files = files
         self.keepOriginals = keepOriginals
@@ -174,7 +174,7 @@ final class SessionController {
         if let photo = photo(id: job.location.photoID) {
             photo.state = cropKind == nil ? .failed : .processed
             photo.cropKind = cropKind
-            if cropKind != nil, !keepOriginals { try? FileManager.default.removeItem(at: job.original) }
+            if cropKind != nil, !keepOriginals() { try? FileManager.default.removeItem(at: job.original) }
             save()
         } else {
             // Discarded or replaced while it was being processed.

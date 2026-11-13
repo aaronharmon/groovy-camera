@@ -33,7 +33,7 @@ struct PhotoIndexTests {
         #expect(PhotoIndex.baseURL("photos.example.com/") == "https://photos.example.com")
         #expect(PhotoIndex.baseURL(" https://photos.example.com ") == "https://photos.example.com")
         #expect(PhotoIndex.url(domain: "")?.absoluteString == nil)
-        #expect(PhotoIndex.url(domain: "photos.example.com")?.absoluteString == "https://photos.example.com/records/photos.csv")
+        #expect(PhotoIndex.url(domain: "photos.example.com")?.absoluteString == "https://photos.example.com/photos.csv")
     }
 
     @Test func isOnlyHeadersWithNothingUploaded() {

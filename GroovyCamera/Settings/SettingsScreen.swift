@@ -58,7 +58,7 @@ struct SettingsScreen: View {
                 } header: {
                     Text("Photo domain")
                 } footer: {
-                    Text("The bucket's custom domain. The app keeps a spreadsheet of every uploaded photo's link at records/photos.csv, updated after each upload. Clearing it lists only records shot afterwards; their photos stay in R2.")
+                    Text("The bucket's custom domain. The app keeps a spreadsheet of every uploaded photo's link at photos.csv in the bucket, updated after each upload. Clearing it lists only records shot afterwards; their photos stay in R2.")
                 }
                 .confirmationDialog("Clear the spreadsheet?", isPresented: $isConfirmingClear, titleVisibility: .visible) {
                     Button("Clear spreadsheet", role: .destructive) { uploader.clearSpreadsheet() }

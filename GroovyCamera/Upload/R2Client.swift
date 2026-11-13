@@ -13,7 +13,8 @@ struct R2Credentials: Codable, Equatable, Sendable {
     }
 }
 
-/// Builds signed requests for R2's S3-compatible API. The app only ever writes under `records/`.
+/// Builds signed requests for R2's S3-compatible API. The app only ever writes under `records/`,
+/// plus the spreadsheet, `photos.csv`, at the bucket's root.
 struct R2Client: Sendable {
     let credentials: R2Credentials
 
@@ -62,7 +63,8 @@ struct R2Client: Sendable {
     }
 
     static func isAllowed(_ key: String) -> Bool {
-        key.hasPrefix(prefix) && !key.split(separator: "/").contains("..") && key.count > prefix.count
+        if key == PhotoIndex.key { return true }
+        return key.hasPrefix(prefix) && !key.split(separator: "/").contains("..") && key.count > prefix.count
     }
 
     /// Uploads and deletes a small file under `records/`, so Settings can show whether the bucket

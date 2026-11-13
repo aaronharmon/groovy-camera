@@ -52,6 +52,8 @@ struct R2Tests {
         #expect(client.request(method: "PUT", key: "other/file.jpg") == nil)
         #expect(client.request(method: "PUT", key: "records/") == nil)
         #expect(client.request(method: "PUT", key: "records/../other.jpg") == nil)
+        #expect(client.request(method: "PUT", key: "other.csv") == nil)
+        #expect(client.request(method: "PUT", key: PhotoIndex.key) != nil)
     }
 
     @Test func needsEveryCredential() {

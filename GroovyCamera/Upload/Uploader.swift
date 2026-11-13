@@ -29,6 +29,9 @@ final class Uploader {
     @ObservationIgnored private let session: URLSession
     @ObservationIgnored private var isScheduling = false
     @ObservationIgnored private var needsAnotherPass = false
+    /// Run once the passes in progress are done, such as handing control back to iOS after a
+    /// background relaunch.
+    @ObservationIgnored private var afterPasses: [() -> Void] = []
     /// Bumped whenever the spreadsheet's contents change. Stored, so a change made just before the
     /// app closes still gets uploaded.
     @ObservationIgnored private var indexVersion: Int {
@@ -54,15 +57,19 @@ final class Uploader {
         }
         events.onAllDelivered = { [weak self] in
             MainActor.assumeIsolated {
-                self?.save()
-                BackgroundUploads.finishEvents()
+                guard let self else { return BackgroundUploads.finishEvents() }
+                self.save()
+                // The pass that uploads the spreadsheet has to start before iOS suspends the app.
+                self.schedule(then: BackgroundUploads.finishEvents)
             }
         }
         schedule()
     }
 
-    /// Hands every ready photo without a live upload to iOS.
-    func schedule() {
+    /// Hands every ready photo without a live upload to iOS, and then the spreadsheet once they've
+    /// all gone up.
+    func schedule(then done: (() -> Void)? = nil) {
+        if let done { afterPasses.append(done) }
         guard !isScheduling else {
             needsAnotherPass = true
             return
@@ -74,6 +81,10 @@ final class Uploader {
             if needsAnotherPass {
                 needsAnotherPass = false
                 schedule()
+            } else {
+                let done = afterPasses
+                afterPasses = []
+                done.forEach { $0() }
             }
         }
     }
@@ -224,8 +235,8 @@ final class Uploader {
         }
         save()
         refreshSummary()
-        if next == .uploaded { clearUploaded() }
-        if next == .retry { schedule() }
+        // A new pass after an upload is what puts the spreadsheet up once the last photo is in.
+        if next != .needsAttention { schedule() }
     }
 
     private func photos(in upload: Photo.Upload) -> [Photo] {

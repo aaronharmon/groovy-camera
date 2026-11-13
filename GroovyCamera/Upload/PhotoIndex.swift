@@ -1,13 +1,14 @@
 import Foundation
 
-/// The spreadsheet of every uploaded photo's link, kept at `records/photos.csv` in the bucket.
+/// The spreadsheet of every uploaded photo's link, kept at `photos.csv` in the bucket's root, beside
+/// `records/` rather than inside it, so it's easy to find in the dashboard.
 ///
 /// One row per photo, with the record's folder only on its first row, so each record reads as a
 /// block. Records run oldest first, so new ones land at the bottom. It's rebuilt from this phone's
 /// records, so photos uploaded by an earlier install of the app aren't listed, and nor are records
 /// started before the spreadsheet was last cleared.
 enum PhotoIndex {
-    static let key = "\(R2Client.prefix)photos.csv"
+    static let key = "photos.csv"
     /// Short, so the spreadsheet's link shows new rows within a minute.
     static let headers = [
         "Content-Type": "text/csv; charset=utf-8",

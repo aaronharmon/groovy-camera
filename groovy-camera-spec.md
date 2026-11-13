@@ -133,7 +133,7 @@ records/
 - Bottom: shutter, thumbnail strip of this session's slots (tap to retake), **Gatefold**, **+ Extra**, **Done**, **Set White**.
 - **Discard session**, once the session has a photo.
 
-**Spreadsheet (no Library screen).** The app keeps `records/photos.csv` in the bucket, listing every uploaded photo's link: one row per photo (Record, Photo, URL), with the record's date and time only on its first row, oldest first. Settings has its link and a **Clear spreadsheet** button, after which only records shot from then on are listed (their photos stay in R2). Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
+**Spreadsheet (no Library screen).** The app keeps `photos.csv` at the bucket's root, beside `records/`, listing every uploaded photo's link: one row per photo (Record, Photo, URL), with the record's date and time only on its first row, oldest first. Settings has its link and a **Clear spreadsheet** button, after which only records shot from then on are listed (their photos stay in R2). Full-size photos are pulled from R2 on a laptop with existing tools, not through the app.
 
 **Settings.** R2 account ID, bucket name and token credentials; photo domain, for the spreadsheet's links; upload counts; keep local copies for N days; keep originals (for testing).
 
